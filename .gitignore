@@ -1,0 +1,30 @@
+# ── 민감 파일 (절대 커밋 금지) ──
+client_secret.json
+token.pickle
+credentials.json
+
+# ── 런타임 생성 상태 파일 ──
+signal_snapshot.json
+
+# ── 로그 ──
+log_*.txt
+*.log
+
+# ── Python ──
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+
+# ── IDE / OS ──
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ── 스케줄러 임시 파일 ──
+task_global.xml
+task_global_utf16.xml
