@@ -164,6 +164,35 @@ def get_silver_investing():
     return _scrape_investing("https://kr.investing.com/commodities/silver")
 
 
+def get_yield_investing(maturity):
+    urls = {
+        "2Y": "https://kr.investing.com/rates-bonds/u.s.-2-year-bond-yield",
+        "10Y": "https://kr.investing.com/rates-bonds/u.s.-10-year-bond-yield",
+        "30Y": "https://kr.investing.com/rates-bonds/u.s.-30-year-bond-yield",
+    }
+    return _scrape_investing(urls[maturity])
+
+
+def get_yield_live(maturity, yf_ticker):
+    """미국 현물 채권시장(KST 22:30~익일 05:00) 중에는 yfinance 1분봉으로 실시간 수익률,
+    그 외 시간/실패 시 investing.com 폴백."""
+    if US_CASH_OPEN and yf_ticker:
+        try:
+            tk = yf.Ticker(yf_ticker)
+            h = tk.history(period="1d", interval="1m")
+            if len(h) > 0:
+                last = float(h["Close"].iloc[-1])
+                prev = _yf_prev_close(yf_ticker)
+                chg_str = ""
+                if prev:
+                    chg = (last - prev) / prev * 100
+                    chg_str = f"{chg:+.2f}%"
+                return f"{last:.3f}", chg_str, last
+        except Exception:
+            pass
+    return get_yield_investing(maturity)
+
+
 def scrape_yahoo_quote(url, symbol=None):
     """Yahoo Finance quote 페이지에서 현재가와 등락률 파싱.
     symbol 지정 시 해당 심볼의 fin-streamer만 매칭 (관련종목과 혼동 방지).
@@ -473,9 +502,10 @@ def collect_all_data():
     data = {}
 
     # 금리
-    _, data["2y_chg"], data["2y"] = get_price_and_change("2YY=F")
-    _, data["10y_chg"], data["10y"] = get_price_and_change("^TNX")
-    _, data["30y_chg"], data["30y"] = get_price_and_change("^TYX")
+    # 채권 수익률: 미국 현물장 중에는 yfinance 1분봉, 그 외에는 investing.com (2Y는 yfinance 데이터 불안정으로 항상 investing.com)
+    _, data["2y_chg"], data["2y"] = get_yield_live("2Y", None)
+    _, data["10y_chg"], data["10y"] = get_yield_live("10Y", "^TNX")
+    _, data["30y_chg"], data["30y"] = get_yield_live("30Y", "^TYX")
 
     # 환율
     _, data["dxy_chg"], data["dxy"] = get_price_and_change("DX-Y.NYB")
@@ -854,7 +884,7 @@ st.markdown(f"""
     .strategy-box li:last-child {{ border-bottom: none; }}
     .strategy-box li::before {{ content: '→ '; color: {ACCENT_GOLD}; font-weight: 600; }}
 
-    /* expander 스타일 */
+    /* expander 스타일 (구버전 + 신버전 Streamlit 모두 대응) */
     .streamlit-expanderHeader {{
         background: {CARD_BG} !important;
         border: 1px solid {CARD_BORDER} !important;
@@ -866,6 +896,50 @@ st.markdown(f"""
         background: {CARD_BG} !important;
         border: 1px solid {CARD_BORDER} !important;
         border-top: none !important;
+    }}
+    [data-testid="stExpander"] details {{
+        background: {CARD_BG} !important;
+        border: 1px solid {CARD_BORDER} !important;
+        border-radius: 8px !important;
+    }}
+    [data-testid="stExpander"] details summary {{
+        background: {CARD_BG} !important;
+        color: {TEXT_PRIMARY} !important;
+    }}
+    [data-testid="stExpander"] details[open] summary {{
+        background: {CARD_BG} !important;
+        color: {TEXT_PRIMARY} !important;
+        border-bottom: 1px solid {CARD_BORDER} !important;
+    }}
+    [data-testid="stExpander"] details > div,
+    [data-testid="stExpanderDetails"] {{
+        background: {CARD_BG} !important;
+        color: {TEXT_PRIMARY} !important;
+    }}
+    [data-testid="stExpander"] * {{
+        color: {TEXT_PRIMARY};
+    }}
+
+    /* popover (❓ 설명창) — 흰 배경 → 카드 배경으로 강제 */
+    [data-testid="stPopover"] button {{
+        background: {CARD_BG} !important;
+        color: {TEXT_PRIMARY} !important;
+        border: 1px solid {CARD_BORDER} !important;
+    }}
+    [data-baseweb="popover"] [data-testid="stPopoverBody"],
+    [data-testid="stPopoverBody"],
+    [data-baseweb="popover"] > div,
+    [data-baseweb="popover"] [role="dialog"] {{
+        background: {CARD_BG} !important;
+        color: {TEXT_PRIMARY} !important;
+        border: 1px solid {CARD_BORDER} !important;
+    }}
+    [data-baseweb="popover"] * {{
+        color: {TEXT_PRIMARY} !important;
+        background-color: transparent !important;
+    }}
+    [data-baseweb="popover"] strong, [data-baseweb="popover"] code {{
+        color: {ACCENT_GOLD} !important;
     }}
 
     /* 하단 면책 */
@@ -1007,7 +1081,7 @@ with st.expander(f"금리 — T-Risk {d['t_risk']:.0f}점 · {t_g}"):
     ]:
         if val is not None:
             g, _ = assess_risk(key, val)
-            rows.append((label, f"{val:.3f}%{trend_arrow(chg)}", badge_html(g)))
+            rows.append((label, f"<span style='color:#22c55e;font-weight:600'>(실)</span> {val:.3f}%{trend_arrow(chg)}", badge_html(g)))
     if d["spread"] is not None:
         sp = d["spread"]
         if sp < 0: sp_b = badge_html("위험")
@@ -1042,7 +1116,7 @@ with st.expander(f"원자재 — C-Risk {d['c_risk']:.0f}점 · {c_g}"):
         ("Silver", None, d.get("silver"), "${:.2f}", d.get("silver_chg")),
     ]:
         if val is not None:
-            v = fmt.format(val) + trend_arrow(chg)
+            v = "<span style='color:#22c55e;font-weight:600'>(실)</span> " + fmt.format(val) + trend_arrow(chg)
             b = badge_html(assess_risk(key, val)[0]) if key else "—"
             rows.append((label, v, b))
     if d["oil_avg"] is not None:
@@ -1063,9 +1137,9 @@ with st.expander(f"위험 심리 — VIX Score {d['vix_score']:.0f}점 · {v_g}"
     if d["vix"] is not None:
         g, _ = assess_risk("VIX", d["vix"])
         vix_label = "CBOE VIX (선물)" if d.get("vix_is_futures") else "CBOE VIX"
-        rows.append((vix_label, f"{d['vix']:.2f}{trend_arrow(d.get('vix_chg'))}", badge_html(g)))
+        rows.append((vix_label, f"<span style='color:#22c55e;font-weight:600'>(실)</span> {d['vix']:.2f}{trend_arrow(d.get('vix_chg'))}", badge_html(g)))
     if d["gold"] is not None:
-        rows.append(("Gold", f"${d['gold']:,.0f}{trend_arrow(d.get('gold_chg_str'))}", d.get("gold_chg_str", "")))
+        rows.append(("Gold", f"<span style='color:#22c55e;font-weight:600'>(실)</span> ${d['gold']:,.0f}{trend_arrow(d.get('gold_chg_str'))}", d.get("gold_chg_str", "")))
     if d["btc"] is not None:
         rows.append(("Bitcoin", f"${d['btc']:,.0f}", d.get("btc_chg_str", "")))
     st.markdown(detail_table(rows), unsafe_allow_html=True)
