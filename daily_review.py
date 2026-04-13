@@ -1254,26 +1254,35 @@ def scan_kr_featured_stocks(existing_tickers):
 
 
 def get_kr_bond_3y():
-    """한국 국채 3년물 금리를 investing.com에서 스크래핑"""
+    """한국 국채 3년물 금리 — 네이버 금융 primary (클라우드 IP OK), investing.com 폴백."""
+    try:
+        url = "https://finance.naver.com/marketindex/interestDailyQuote.naver?marketindexCd=IRR_GOVT03Y"
+        resp = req.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
+        nums = re.findall(r'<td class="num">([0-9.]+)</td>', resp.text)
+        if len(nums) >= 2:
+            close = float(nums[0]); prev = float(nums[1])
+            chg = (close - prev) / prev * 100
+            chg_str = f"{chg:+.2f}%"
+            print(f"  한국 국채 3년물 (naver): {close:.3f}% {chg_str}")
+            return f"{close:.3f}%", chg_str
+    except Exception as e:
+        print(f"  naver 실패 → investing.com 폴백: {e}")
+    # 폴백: investing.com
     try:
         url = "https://kr.investing.com/rates-bonds/south-korea-3-year-bond-yield"
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        }
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
         resp = req.get(url, headers=headers, timeout=15)
         soup = BeautifulSoup(resp.text, "html.parser")
-
         price_el = soup.find(attrs={"data-test": "instrument-price-last"})
         price = price_el.get_text(strip=True) if price_el else ""
-
         change_el = soup.find(attrs={"data-test": "instrument-price-change-percent"})
         change_pct = change_el.get_text(strip=True).strip("()") if change_el else ""
-
-        print(f"  한국 국채 3년물: {price}% {change_pct}")
-        return f"{price}%", change_pct
+        if price:
+            print(f"  한국 국채 3년물 (investing): {price}% {change_pct}")
+            return f"{price}%", change_pct
     except Exception as e:
-        print(f"  한국 국채 3년물 스크래핑 실패: {e}")
-        return "", ""
+        print(f"  한국 국채 3년물 실패: {e}")
+    return "", ""
 
 
 # ── 국장 시트 데이터 구성 ──
@@ -1511,11 +1520,11 @@ def build_korea_sheet(target_date):
     def get_price_and_change_2f(ticker_symbol):
         try:
             tk = yf.Ticker(ticker_symbol)
-            hist = tk.history(period="5d")
+            hist = tk.history(period="10d")["Close"].dropna()
             if len(hist) < 2:
                 return "", ""
-            prev_close = hist["Close"].iloc[-2]
-            last_close = hist["Close"].iloc[-1]
+            prev_close = float(hist.iloc[-2])
+            last_close = float(hist.iloc[-1])
             pct = (last_close - prev_close) / prev_close * 100
             price_str = f"{last_close:,.2f}"
             return price_str, f"{pct:+.2f}%"

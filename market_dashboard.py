@@ -144,24 +144,47 @@ def _scrape_investing(url):
         return "", "", None
 
 
+# ── 원자재: yfinance 선물 primary, investing.com 폴백 ──
+def _yf_commodity(ticker_symbol):
+    price_str, chg_str, val = get_price_and_change(ticker_symbol)
+    if val is not None:
+        return price_str, chg_str, val
+    return "", "", None
+
+
 def get_copper_investing():
+    r = _yf_commodity("HG=F")
+    if r[2] is not None: return r
     return _scrape_investing("https://kr.investing.com/commodities/copper?cid=959211")
 
 
 def get_wti_investing():
+    r = _yf_commodity("CL=F")
+    if r[2] is not None: return r
     return _scrape_investing("https://kr.investing.com/commodities/crude-oil")
 
 
 def get_gold_investing():
+    r = _yf_commodity("GC=F")
+    if r[2] is not None: return r
     return _scrape_investing("https://kr.investing.com/commodities/gold")
 
 
 def get_vix_futures_investing():
+    # Yahoo VX=F 없음 → ^VIX 일봉 종가로 폴백 (현물 폐장 시에도 yfinance는 전일 종가 제공)
+    r = _yf_commodity("^VIX")
+    if r[2] is not None: return r
     return _scrape_investing("https://kr.investing.com/indices/us-spx-vix-futures")
 
 
 def get_silver_investing():
+    r = _yf_commodity("SI=F")
+    if r[2] is not None: return r
     return _scrape_investing("https://kr.investing.com/commodities/silver")
+
+
+# ── 미국 채권: yfinance primary (^TNX/^TYX/^FVX/2YY=F), investing.com 폴백 ──
+YIELD_YF = {"2Y": "2YY=F", "10Y": "^TNX", "30Y": "^TYX"}
 
 
 def get_yield_investing(maturity):
@@ -173,23 +196,33 @@ def get_yield_investing(maturity):
     return _scrape_investing(urls[maturity])
 
 
-def get_yield_live(maturity, yf_ticker):
-    """미국 현물 채권시장(KST 22:30~익일 05:00) 중에는 yfinance 1분봉으로 실시간 수익률,
-    그 외 시간/실패 시 investing.com 폴백."""
-    if US_CASH_OPEN and yf_ticker:
+def _yf_yield(yf_ticker):
+    """yfinance 일봉 종가로 수익률 반환 (실시간 1분봉 우선, 없으면 일봉)."""
+    try:
+        tk = yf.Ticker(yf_ticker)
         try:
-            tk = yf.Ticker(yf_ticker)
-            h = tk.history(period="1d", interval="1m")
-            if len(h) > 0:
-                last = float(h["Close"].iloc[-1])
+            m = tk.history(period="2d", interval="1m")["Close"].dropna()
+            if len(m):
+                last = float(m.iloc[-1])
                 prev = _yf_prev_close(yf_ticker)
-                chg_str = ""
-                if prev:
-                    chg = (last - prev) / prev * 100
-                    chg_str = f"{chg:+.2f}%"
+                chg_str = f"{(last-prev)/prev*100:+.2f}%" if prev else ""
                 return f"{last:.3f}", chg_str, last
         except Exception:
             pass
+        d = tk.history(period="10d")["Close"].dropna()
+        if len(d) >= 2:
+            last = float(d.iloc[-1]); prev = float(d.iloc[-2])
+            return f"{last:.3f}", f"{(last-prev)/prev*100:+.2f}%", last
+    except Exception:
+        pass
+    return "", "", None
+
+
+def get_yield_live(maturity, yf_ticker):
+    """yfinance primary, investing.com 폴백. yf_ticker 인자는 호환성용 (내부에서 YIELD_YF 사용)."""
+    r = _yf_yield(yf_ticker or YIELD_YF.get(maturity, ""))
+    if r[2] is not None:
+        return r
     return get_yield_investing(maturity)
 
 
