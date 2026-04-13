@@ -245,31 +245,64 @@ def assess_risk(indicator, value):
     return "", None
 
 
-def get_copper_investing():
-    """investing.com에서 구리(COPPER) 가격 및 변동률 수집 (톤당 USD)"""
+def _scrape_investing(url):
     try:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Accept-Language": "ko-KR,ko;q=0.9",
         }
-        resp = req.get("https://kr.investing.com/commodities/copper?cid=959211", headers=headers, timeout=15)
+        resp = req.get(url, headers=headers, timeout=15)
         text = resp.text
-
         price_match = re.search(r'data-test="instrument-price-last"[^>]*>([^<]+)', text)
         change_match = re.search(r'data-test="instrument-price-change-percent"[^>]*>([^<]+)', text)
-
         price_str = price_match.group(1).strip() if price_match else ""
         change_str = change_match.group(1).strip() if change_match else ""
-
-        # 숫자로 파싱 (위험 진단용)
-        price_val = None
-        if price_str:
-            price_val = float(price_str.replace(",", ""))
-
+        price_val = float(price_str.replace(",", "")) if price_str else None
         return price_str, change_str, price_val
     except Exception as e:
-        print(f"    investing.com 구리 가격 수집 실패: {e}")
+        print(f"    investing.com 수집 실패 ({url}): {e}")
         return "", "", None
+
+
+def get_copper_investing():
+    return _scrape_investing("https://kr.investing.com/commodities/copper?cid=959211")
+
+
+def get_wti_investing():
+    return _scrape_investing("https://kr.investing.com/commodities/crude-oil")
+
+
+def get_gold_investing():
+    return _scrape_investing("https://kr.investing.com/commodities/gold")
+
+
+def get_silver_investing():
+    return _scrape_investing("https://kr.investing.com/commodities/silver")
+
+
+def get_vix_futures_investing():
+    return _scrape_investing("https://kr.investing.com/indices/us-spx-vix-futures")
+
+
+def parse_pct(chg_str):
+    """'+0.47%' 또는 '(-3.99%)' 문자열 → float. 실패 시 None"""
+    if not chg_str:
+        return None
+    m = re.search(r"([+-]?\d+\.?\d*)", str(chg_str))
+    if not m:
+        return None
+    try:
+        return float(m.group(1))
+    except ValueError:
+        return None
+
+
+def linear_risk_score(value, t1, t3, cap=40):
+    """t1에서 0, t3에서 30, 선형 외삽 (최대 cap)"""
+    if value is None or t3 <= t1:
+        return 0
+    s = (value - t1) / (t3 - t1) * 30
+    return max(0, min(cap, s))
 
 
 def assess_copper_risk(current_price=None):
@@ -307,50 +340,49 @@ def assess_copper_risk(current_price=None):
         return "", None
 
 
-def compute_c_risk_index(wti_val, brent_val, gold_val, copper_val):
-    """원자재 종합 위험 지수 (C-Risk Index)
-    유가(WTI/BRN 평균) 60%, 금/구리 비율(Gold/Copper) 40%
-    100점 환산: Oil Score×2 + G/C Ratio Score×1.33
+def compute_c_risk_index(wti_val, brent_val, gold_val, copper_val,
+                         oil_chg=None, gold_chg=None, silver_chg=None,
+                         copper_chg=None, btc_chg=None):
+    """원자재 종합 위험 지수 (선형 + 단기 모멘텀)
+    유가 수준(선형 0@85→30@105, 가중 2.0) + G/C 비율(선형 0@0.35→20@0.55, 가중 1.0)
+    + 단기 모멘텀(원자재·BTC 일변동 절대값 Σ max(0,|%|-2)*5, 최대 50)
     """
     GREEN = {"red": 0, "green": 0.6, "blue": 0}
     YELLOW = {"red": 0.8, "green": 0.8, "blue": 0}
     ORANGE = {"red": 1, "green": 0.5, "blue": 0}
     RED = {"red": 1, "green": 0, "blue": 0}
 
-    # 유가 점수 (WTI/BRN 평균)
     oil_score = 0
     oil_avg = None
     if wti_val is not None and brent_val is not None:
         oil_avg = (wti_val + brent_val) / 2
-        if oil_avg < 85:
-            oil_score = 0
-        elif oil_avg <= 95:
-            oil_score = 10
-        elif oil_avg <= 105:
-            oil_score = 20
-        else:
-            oil_score = 30
+        oil_score = max(0, min(40, (oil_avg - 85) / 20 * 30))
+    elif wti_val is not None:
+        oil_avg = wti_val
+        oil_score = max(0, min(40, (oil_avg - 85) / 20 * 30))
 
-    # 금/구리 비율 점수 (Gold $/oz ÷ Copper $/ton)
     gc_score = 0
     gc_ratio = None
     if gold_val is not None and copper_val is not None and copper_val > 0:
         gc_ratio = gold_val / copper_val
-        if gc_ratio < 0.35:
-            gc_score = 0
-        elif gc_ratio <= 0.45:
-            gc_score = 10
-        elif gc_ratio <= 0.55:
-            gc_score = 20
-        else:
-            gc_score = 30
+        gc_score = max(0, min(25, (gc_ratio - 0.35) / 0.20 * 20))
 
-    total = oil_score * 2 + gc_score * 1.33
+    # 단기 모멘텀
+    momentum = 0
+    for chg in (oil_chg, gold_chg, silver_chg, copper_chg, btc_chg):
+        v = parse_pct(chg) if isinstance(chg, str) else chg
+        if v is None:
+            continue
+        momentum += max(0, abs(v) - 2) * 5
+    momentum = min(momentum, 50)
+
+    total = oil_score * 2.0 + gc_score * 1.0 + momentum
     total = min(total, 100)
 
     # 디버그 출력
-    print(f"  C-Risk: 유가평균=${oil_avg:.1f}, G/C비율={gc_ratio:.3f}" if oil_avg and gc_ratio else "")
-    print(f"  C-Risk: 유가점수={oil_score}, G/C점수={gc_score}, 종합={total:.0f}점")
+    if oil_avg and gc_ratio:
+        print(f"  C-Risk: 유가평균=${oil_avg:.1f}, G/C비율={gc_ratio:.3f}")
+    print(f"  C-Risk: 유가={oil_score:.1f} G/C={gc_score:.1f} 모멘텀={momentum:.0f} 종합={total:.0f}점")
 
     if total <= 30:
         return f"안정({total:.0f}점)", GREEN, total
@@ -372,21 +404,9 @@ def compute_fx_risk_index(dxy_val, jpy_val, cny_val):
     ORANGE = {"red": 1, "green": 0.5, "blue": 0}
     RED = {"red": 1, "green": 0, "blue": 0}
 
-    def fx_score(value, t1, t2, t3):
-        if value is None:
-            return 0
-        if value < t1:
-            return 0
-        elif value <= t2:
-            return 10
-        elif value <= t3:
-            return 20
-        else:
-            return 30
-
-    dxy_score = fx_score(dxy_val, 103, 105, 108)
-    jpy_score = fx_score(jpy_val, 145, 152, 158)
-    cny_score = fx_score(cny_val, 7.15, 7.25, 7.35)
+    dxy_score = linear_risk_score(dxy_val, 103, 108)
+    jpy_score = linear_risk_score(jpy_val, 145, 158)
+    cny_score = linear_risk_score(cny_val, 7.15, 7.35)
 
     total = dxy_score * 1.67 + jpy_score * 1.0 + cny_score * 0.67
     total = min(total, 100)
@@ -410,12 +430,10 @@ def compute_t_risk_index(bond_2y_val, bond_10y_val, bond_30y_val):
     ORANGE = {"red": 1, "green": 0.5, "blue": 0}
     RED = {"red": 1, "green": 0, "blue": 0}
 
-    risk_scores = {"안정": 0, "주의": 10, "위험": 20, "고위험": 30}
-
-    # 각 금리 수치별 점수
-    score_2y = risk_scores.get(assess_risk("2Y", bond_2y_val)[0], 0)
-    score_10y = risk_scores.get(assess_risk("10Y", bond_10y_val)[0], 0)
-    score_30y = risk_scores.get(assess_risk("30Y", bond_30y_val)[0], 0)
+    # 각 금리 수치별 점수 (선형)
+    score_2y = linear_risk_score(bond_2y_val, 4.5, 5.2)
+    score_10y = linear_risk_score(bond_10y_val, 4.2, 4.8)
+    score_30y = linear_risk_score(bond_30y_val, 4.3, 5.2)
 
     # 장단기 금리차 점수
     spread_score = 0
@@ -477,17 +495,10 @@ def compute_macro_composite(t_risk_score, fx_risk_score, c_risk_score, vix_val):
     ORANGE = {"red": 1, "green": 0.5, "blue": 0}
     RED = {"red": 1, "green": 0, "blue": 0}
 
-    # VIX → 100점 환산
+    # VIX → 100점 환산 (선형: 15→0, 35→100)
     vix_score = 0
     if vix_val is not None:
-        if vix_val <= 20:
-            vix_score = 0
-        elif vix_val <= 25:
-            vix_score = 33
-        elif vix_val <= 30:
-            vix_score = 67
-        else:
-            vix_score = 100
+        vix_score = max(0, min(100, (vix_val - 15) / 20 * 100))
 
     total = (t_risk_score * 0.30
              + fx_risk_score * 0.25
@@ -608,15 +619,21 @@ def build_global_sheet(target_date):
     usd_jpy, usd_jpy_chg = get_price_and_change("JPY=X")
     usd_cny, usd_cny_chg = get_price_and_change("CNY=X")
 
-    # 매크로 - 원자재
+    # 매크로 - 원자재 (Investing.com 실시간 스크래핑)
     brent, brent_chg = get_price_and_change("BZ=F")
-    wti, wti_chg = get_price_and_change("CL=F")
-    print("  investing.com: 구리 가격 확인 중...")
+    print("  investing.com: WTI/Gold/Silver/Copper/VIX선물 가격 확인 중...")
+    wti, wti_chg, _wti_val = get_wti_investing()
+    gold_price, gold_chg, _gold_val = get_gold_investing()
+    silver_price, silver_chg, silver_val = get_silver_investing()
     copper, copper_chg, copper_val = get_copper_investing()
 
-    # 위험 심리
+    # 위험 심리 — VIX는 현물가 우선, 실패 시 선물
     vix_price, vix_chg = get_price_and_change("^VIX")
-    gold_price, gold_chg = get_price_and_change("GC=F")
+    vix_is_futures = False
+    if not vix_price:
+        _vp, _vc, _ = get_vix_futures_investing()
+        vix_price, vix_chg = _vp, _vc
+        vix_is_futures = True
     btc_price, btc_chg = get_price_and_change("BTC-USD")
 
     # 지수 등락률
@@ -816,7 +833,24 @@ def build_global_sheet(target_date):
     brent_risk, brent_rc = assess_risk("BRN", brent_val)
     wti_risk, wti_rc = assess_risk("WTI", wti_val)
     copper_risk, copper_rc = assess_copper_risk()
-    c_risk_label, c_risk_color, c_risk_score = compute_c_risk_index(wti_val, brent_val, gold_val, copper_val)
+    # 유가 평균 등락
+    _wti_pct = parse_pct(wti_chg)
+    _brent_pct = parse_pct(brent_chg)
+    _oil_pct = None
+    if _wti_pct is not None and _brent_pct is not None:
+        _oil_pct = (_wti_pct + _brent_pct) / 2
+    elif _wti_pct is not None:
+        _oil_pct = _wti_pct
+    elif _brent_pct is not None:
+        _oil_pct = _brent_pct
+    c_risk_label, c_risk_color, c_risk_score = compute_c_risk_index(
+        wti_val, brent_val, gold_val, copper_val,
+        oil_chg=_oil_pct,
+        gold_chg=parse_pct(gold_chg),
+        silver_chg=parse_pct(silver_chg),
+        copper_chg=parse_pct(copper_chg),
+        btc_chg=parse_pct(btc_chg),
+    )
     vix_val = parse_price(vix_price)
     vix_risk, vix_color = assess_risk("VIX", vix_val)
     macro_label, macro_color = compute_macro_composite(t_risk_score, fx_risk_score, c_risk_score, vix_val)
@@ -872,9 +906,11 @@ def build_global_sheet(target_date):
     if wti_rc: risk_cells.append((len(rows), wti_rc))
     rows.append(["", "", "COPPER", copper, copper_chg, copper_risk])
     if copper_rc: risk_cells.append((len(rows), copper_rc))
+    rows.append(["", "", "SILVER", silver_price, silver_chg, ""])
     rows.append(["", "", "원자재 종합 경보", "", "", c_risk_label])
     if c_risk_color: risk_cells.append((len(rows), c_risk_color))
-    rows.append(["", "위험 심리", "VIX", vix_price, vix_chg, vix_risk])
+    vix_label = "VIX (선물)" if vix_is_futures else "VIX"
+    rows.append(["", "위험 심리", vix_label, vix_price, vix_chg, vix_risk])
     if vix_color: risk_cells.append((len(rows), vix_color))
     rows.append(["", "", "GOLD", gold_price, gold_chg, ""])
     rows.append(["", "", "BITCOIN", btc_price, btc_chg, ""])

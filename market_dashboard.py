@@ -8,8 +8,34 @@ import streamlit as st
 import yfinance as yf
 import requests as req
 import re
+import json
+import os
 from datetime import datetime, timedelta
 import time
+from concurrent.futures import ThreadPoolExecutor
+
+MACRO_SNAPSHOT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "macro_snapshot.json")
+PROMOTED_KR_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "promoted_kr.json")
+KR_PROMO_TRACKER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "kr_promotion_tracker.json")
+LONG_SIGN_SEEN_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "long_sign_seen.json")
+
+
+def load_json_safe(path):
+    try:
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+
+def save_json_safe(path, obj):
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(obj, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
 
 st.set_page_config(page_title="시장 위험 진단", page_icon="📊", layout="wide")
 
@@ -24,9 +50,25 @@ def is_market_open():
     from datetime import time as dtime
     korea_open = dtime(9, 0) <= t <= dtime(15, 30)
     us_open = t >= dtime(22, 30) or t <= dtime(5, 0)
-    return korea_open or us_open
+    # 월요일은 04:00부터 매크로 지표 확인을 위해 자동갱신
+    monday_early = now.weekday() == 0 and t >= dtime(4, 0)
+    return korea_open or us_open or monday_early
+
+def is_us_cash_open():
+    # 미국 현물장 (KST 월~금 22:30~05:00, 요일 경계 처리)
+    now = datetime.now()
+    from datetime import time as dtime
+    t = now.time()
+    wd = now.weekday()
+    # 22:30~자정 구간은 월~금(0~4), 자정~05:00 구간은 화~토(1~5)
+    if t >= dtime(22, 30) and wd <= 4:
+        return True
+    if t <= dtime(5, 0) and 1 <= wd <= 5:
+        return True
+    return False
 
 MARKET_OPEN = is_market_open()
+US_CASH_OPEN = is_us_cash_open()
 if MARKET_OPEN:
     st.markdown('<meta http-equiv="refresh" content="600">', unsafe_allow_html=True)
 
@@ -35,14 +77,31 @@ if MARKET_OPEN:
 # 데이터 수집 함수
 # ══════════════════════════════════════════
 
+def _live_and_prev(tk):
+    """1분봉의 최신가(라이브)와 일봉 전일 종가를 함께 반환"""
+    live = None
+    try:
+        m = tk.history(period="2d", interval="1m")
+        if len(m):
+            live = float(m["Close"].dropna().iloc[-1])
+    except Exception:
+        pass
+    daily = tk.history(period="5d")
+    if len(daily) < 1:
+        return live, None
+    if live is None:
+        if len(daily) < 2:
+            return None, None
+        return float(daily["Close"].iloc[-1]), float(daily["Close"].iloc[-2])
+    return live, float(daily["Close"].iloc[-1])
+
+
 def get_price_and_change(ticker_symbol):
     try:
         tk = yf.Ticker(ticker_symbol)
-        hist = tk.history(period="5d")
-        if len(hist) < 2:
+        last_close, prev_close = _live_and_prev(tk)
+        if last_close is None or prev_close is None:
             return "", "", None
-        prev_close = hist["Close"].iloc[-2]
-        last_close = hist["Close"].iloc[-1]
         pct = (last_close - prev_close) / prev_close * 100
         if last_close >= 1000:
             price_str = f"{last_close:,.0f}"
@@ -58,24 +117,22 @@ def get_price_and_change(ticker_symbol):
 def get_change_pct(ticker_symbol):
     try:
         tk = yf.Ticker(ticker_symbol)
-        hist = tk.history(period="5d")
-        if len(hist) < 2:
+        last_close, prev_close = _live_and_prev(tk)
+        if last_close is None or prev_close is None:
             return "", None
-        prev_close = hist["Close"].iloc[-2]
-        last_close = hist["Close"].iloc[-1]
         pct = (last_close - prev_close) / prev_close * 100
         return f"{pct:+.2f}%", pct
     except Exception:
         return "", None
 
 
-def get_copper_investing():
+def _scrape_investing(url):
     try:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             "Accept-Language": "ko-KR,ko;q=0.9",
         }
-        resp = req.get("https://kr.investing.com/commodities/copper?cid=959211", headers=headers, timeout=15)
+        resp = req.get(url, headers=headers, timeout=15)
         text = resp.text
         price_match = re.search(r'data-test="instrument-price-last"[^>]*>([^<]+)', text)
         change_match = re.search(r'data-test="instrument-price-change-percent"[^>]*>([^<]+)', text)
@@ -85,6 +142,82 @@ def get_copper_investing():
         return price_str, change_str, price_val
     except Exception:
         return "", "", None
+
+
+def get_copper_investing():
+    return _scrape_investing("https://kr.investing.com/commodities/copper?cid=959211")
+
+
+def get_wti_investing():
+    return _scrape_investing("https://kr.investing.com/commodities/crude-oil")
+
+
+def get_gold_investing():
+    return _scrape_investing("https://kr.investing.com/commodities/gold")
+
+
+def get_vix_futures_investing():
+    return _scrape_investing("https://kr.investing.com/indices/us-spx-vix-futures")
+
+
+def get_silver_investing():
+    return _scrape_investing("https://kr.investing.com/commodities/silver")
+
+
+def scrape_yahoo_quote(url, symbol=None):
+    """Yahoo Finance quote 페이지에서 현재가와 등락률 파싱.
+    symbol 지정 시 해당 심볼의 fin-streamer만 매칭 (관련종목과 혼동 방지).
+    반환: (price_str, pct_str, price_val, pct_val)
+    """
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept-Language": "en-US,en;q=0.9",
+        }
+        resp = req.get(url, headers=headers, timeout=15)
+        text = resp.text
+        if symbol:
+            sym_esc = re.escape(symbol)
+            # fin-streamer 태그의 속성 순서는 다양 → data-symbol과 data-field 둘 다 포함하는 태그 찾기
+            price_val = None
+            pct_val = None
+            for m in re.finditer(r'<fin-streamer\b([^>]*)>', text):
+                attrs = m.group(1)
+                if f'data-symbol="{symbol}"' not in attrs:
+                    continue
+                if 'data-field="regularMarketPrice"' in attrs and price_val is None:
+                    v = re.search(r'value="([-\d.]+)"', attrs)
+                    if v: price_val = float(v.group(1))
+                elif 'data-field="regularMarketChangePercent"' in attrs and pct_val is None:
+                    v = re.search(r'value="([-\d.]+)"', attrs)
+                    if v: pct_val = float(v.group(1))
+                if price_val is not None and pct_val is not None:
+                    break
+        else:
+            pm = re.search(r'data-field="regularMarketPrice"[^>]*value="([-\d.]+)', text)
+            cm = re.search(r'data-field="regularMarketChangePercent"[^>]*value="([-\d.]+)', text)
+            price_val = float(pm.group(1)) if pm else None
+            pct_val = float(cm.group(1)) if cm else None
+        # fin-streamer에 없으면 임베드된 이스케이프 JSON에서 시도 (symbol 필요)
+        if symbol and (price_val is None or pct_val is None):
+            sym_esc = re.escape(symbol)
+            pj = re.search(
+                rf'\\"symbol\\":\\"{sym_esc}\\".{{0,3000}}?\\"regularMarketPrice\\":\{{\\"raw\\":([-\d.eE]+)',
+                text, re.DOTALL,
+            )
+            cj = re.search(
+                rf'\\"symbol\\":\\"{sym_esc}\\".{{0,3000}}?\\"regularMarketChangePercent\\":\{{\\"raw\\":([-\d.eE]+)',
+                text, re.DOTALL,
+            )
+            if price_val is None and pj:
+                price_val = float(pj.group(1))
+            if pct_val is None and cj:
+                pct_val = float(cj.group(1))
+        price_str = f"{price_val:,.2f}" if price_val is not None else ""
+        pct_str = f"{pct_val:+.2f}%" if pct_val is not None else ""
+        return price_str, pct_str, price_val, pct_val
+    except Exception:
+        return "", "", None, None
 
 
 # ══════════════════════════════════════════
@@ -107,14 +240,22 @@ def assess_risk(indicator, value):
     }
     if indicator in thresholds:
         t1, t2, t3 = thresholds[indicator]
-        if value <= t1:
-            return "안정", 0
-        elif value <= t2:
-            return "주의", 10
-        elif value <= t3:
-            return "위험", 20
+        # 선형 점수: t1에서 0, t3에서 30, 그 이상은 선형 외삽(캡 40)
+        if t3 > t1:
+            score = (value - t1) / (t3 - t1) * 30
         else:
-            return "고위험", 30
+            score = 0
+        score = max(0, min(40, score))
+        # 등급 버킷 (기존과 동일)
+        if value <= t1:
+            grade = "안정"
+        elif value <= t2:
+            grade = "주의"
+        elif value <= t3:
+            grade = "위험"
+        else:
+            grade = "고위험"
+        return grade, score
     return "N/A", 0
 
 
@@ -153,67 +294,60 @@ def compute_t_risk(bond_2y, bond_10y, bond_30y):
 
 
 def compute_fx_risk(dxy, jpy, cny):
-    def fx_score(value, t1, t2, t3):
+    def fx_score(value, t1, t3):
         if value is None:
             return 0
-        if value < t1:
+        if t3 <= t1:
             return 0
-        elif value <= t2:
-            return 10
-        elif value <= t3:
-            return 20
-        else:
-            return 30
+        s = (value - t1) / (t3 - t1) * 30
+        return max(0, min(40, s))
 
-    d = fx_score(dxy, 103, 105, 108)
-    j = fx_score(jpy, 145, 152, 158)
-    c = fx_score(cny, 7.15, 7.25, 7.35)
+    d = fx_score(dxy, 103, 108)
+    j = fx_score(jpy, 145, 158)
+    c = fx_score(cny, 7.15, 7.35)
     total = d * 1.67 + j * 1.0 + c * 0.67
     return min(total, 100)
 
 
-def compute_c_risk(wti, brent, gold, copper):
+def compute_c_risk(wti, brent, gold, copper, silver=None, btc_chg=None,
+                   oil_chg=None, gold_chg=None, silver_chg=None, copper_chg=None):
+    # 1) 유가 수준: 85→0, 105→30 선형, 이후 외삽 (캡 40)
     oil_score = 0
     oil_avg = None
     if wti is not None and brent is not None:
         oil_avg = (wti + brent) / 2
-        if oil_avg < 85:
-            oil_score = 0
-        elif oil_avg <= 95:
-            oil_score = 10
-        elif oil_avg <= 105:
-            oil_score = 20
-        else:
-            oil_score = 30
+        oil_score = max(0, min(40, (oil_avg - 85) / 20 * 30))
+    elif wti is not None:
+        oil_avg = wti
+        oil_score = max(0, min(40, (oil_avg - 85) / 20 * 30))
 
+    # 2) G/C Ratio 수준: 선형 (regime 지표, 비중 축소)
     gc_score = 0
     gc_ratio = None
     if gold is not None and copper is not None and copper > 0:
         gc_ratio = gold / copper
-        if gc_ratio < 0.35:
-            gc_score = 0
-        elif gc_ratio <= 0.45:
-            gc_score = 10
-        elif gc_ratio <= 0.55:
-            gc_score = 20
-        else:
-            gc_score = 30
+        # 0.35→0, 0.55→20 선형, 극단값 캡
+        gc_score = max(0, min(25, (gc_ratio - 0.35) / 0.20 * 20))
 
-    total = oil_score * 2 + gc_score * 1.33
+    # 3) 단기 모멘텀: 원자재·BTC의 일변동 절대값 합산 (2% 이상부터 가산)
+    momentum = 0
+    for chg in (oil_chg, gold_chg, silver_chg, copper_chg, btc_chg):
+        v = chg_num(chg)
+        if v is None:
+            continue
+        momentum += max(0, abs(v) - 2) * 5  # 2%→0, 4%→10, 6%→20
+    momentum = min(momentum, 50)
+
+    # oil(가중2.0) + gc(가중1.0) + momentum(그대로) — 총합 캡 100
+    total = oil_score * 2.0 + gc_score * 1.0 + momentum
     return min(total, 100), oil_avg, gc_ratio
 
 
 def compute_vix_score(vix_val):
+    # 선형: 15 이하 0, 35 이상 100
     if vix_val is None:
         return 0
-    if vix_val <= 20:
-        return 0
-    elif vix_val <= 25:
-        return 33
-    elif vix_val <= 30:
-        return 67
-    else:
-        return 100
+    return max(0, min(100, (vix_val - 15) / 20 * 100))
 
 
 def risk_grade(score, thresholds=(25, 50, 75)):
@@ -238,6 +372,48 @@ def grade_color(grade):
     }.get(grade, "#757575")
 
 
+def chg_num(chg):
+    """등락률 문자열/숫자에서 float 추출 (실패 시 None)"""
+    if chg is None or chg == "":
+        return None
+    if isinstance(chg, (int, float)):
+        return float(chg)
+    m = re.search(r"([+-]?\d+\.?\d*)", str(chg))
+    if not m:
+        return None
+    try:
+        return float(m.group(1))
+    except ValueError:
+        return None
+
+
+def avg_chg(*vals):
+    nums = [chg_num(v) for v in vals]
+    nums = [n for n in nums if n is not None]
+    return sum(nums) / len(nums) if nums else None
+
+
+def trend_arrow(chg):
+    """등락률(문자열 또는 숫자)을 받아 방향 화살표 HTML 반환"""
+    if chg is None or chg == "":
+        return ""
+    if isinstance(chg, str):
+        m = re.search(r"([+-]?\d+\.?\d*)", chg)
+        if not m:
+            return ""
+        try:
+            v = float(m.group(1))
+        except ValueError:
+            return ""
+    else:
+        v = float(chg)
+    if v > 0:
+        return f' <span style="color:#e04b4b;font-size:0.85em;">▲{v:.2f}%</span>'
+    elif v < 0:
+        return f' <span style="color:#3d7fe0;font-size:0.85em;">▼{abs(v):.2f}%</span>'
+    return ' <span style="color:#888;font-size:0.85em;">―</span>'
+
+
 def grade_emoji(grade):
     return {
         "안정": "🟢",
@@ -252,43 +428,128 @@ def grade_emoji(grade):
 # 데이터 수집 (캐시)
 # ══════════════════════════════════════════
 
-@st.cache_data(ttl=600)
+def _yf_prev_close(ticker):
+    try:
+        h = yf.Ticker(ticker).history(period="5d")
+        if len(h) >= 2:
+            return float(h["Close"].iloc[-2])
+    except Exception:
+        pass
+    return None
+
+
+def _compute_yesterday_baseline():
+    """yfinance 일봉 전일 종가로부터 어제의 4대 risk 점수 재구성"""
+    try:
+        y2 = _yf_prev_close("2YY=F")
+        y10 = _yf_prev_close("^TNX")
+        y30 = _yf_prev_close("^TYX")
+        dxy = _yf_prev_close("DX-Y.NYB")
+        jpy = _yf_prev_close("JPY=X")
+        cny = _yf_prev_close("CNY=X")
+        wti = _yf_prev_close("CL=F")
+        brent = _yf_prev_close("BZ=F")
+        gold = _yf_prev_close("GC=F")
+        copper = _yf_prev_close("HG=F")  # USD/lb
+        # 구리 단위: Investing의 USD/ton 대비 스케일링 (1톤≈2204.62lb)
+        copper_ton = copper * 2204.62 if copper else None
+        vix = _yf_prev_close("^VIX")
+
+        _, t_risk, _ = compute_t_risk(y2, y10, y30)
+        fx_risk = compute_fx_risk(dxy, jpy, cny)
+        c_risk, _, _ = compute_c_risk(wti, brent, gold, copper_ton)
+        vix_score = compute_vix_score(vix)
+        macro_total = min(t_risk * 0.30 + fx_risk * 0.25 + c_risk * 0.25 + vix_score * 0.20, 100)
+        return {
+            "t_risk": t_risk, "fx_risk": fx_risk, "c_risk": c_risk,
+            "vix_score": vix_score, "macro_total": macro_total,
+        }
+    except Exception:
+        return {}
+
+
+@st.cache_data(ttl=900)
 def collect_all_data():
     data = {}
 
     # 금리
-    _, _, data["2y"] = get_price_and_change("2YY=F")
-    _, _, data["10y"] = get_price_and_change("^TNX")
-    _, _, data["30y"] = get_price_and_change("^TYX")
+    _, data["2y_chg"], data["2y"] = get_price_and_change("2YY=F")
+    _, data["10y_chg"], data["10y"] = get_price_and_change("^TNX")
+    _, data["30y_chg"], data["30y"] = get_price_and_change("^TYX")
 
     # 환율
-    _, _, data["dxy"] = get_price_and_change("DX-Y.NYB")
-    _, _, data["usd_jpy"] = get_price_and_change("JPY=X")
-    _, _, data["usd_cny"] = get_price_and_change("CNY=X")
+    _, data["dxy_chg"], data["dxy"] = get_price_and_change("DX-Y.NYB")
+    _, data["usd_jpy_chg"], data["usd_jpy"] = get_price_and_change("JPY=X")
+    _, data["usd_cny_chg"], data["usd_cny"] = get_price_and_change("CNY=X")
 
-    # 원자재
-    _, _, data["wti"] = get_price_and_change("CL=F")
-    _, _, data["brent"] = get_price_and_change("BZ=F")
-    _, data["copper_chg"], data["copper"] = get_copper_investing()
-    _, data["gold_chg_str"], data["gold"] = get_price_and_change("GC=F")
+    # 원자재 — WTI/Gold/Copper/Silver는 Investing.com (yfinance Globex 지연 회피, 병렬 수집)
+    with ThreadPoolExecutor(max_workers=5) as ex:
+        f_wti = ex.submit(get_wti_investing)
+        f_copper = ex.submit(get_copper_investing)
+        f_gold = ex.submit(get_gold_investing)
+        f_silver = ex.submit(get_silver_investing)
+        f_brent = ex.submit(get_price_and_change, "BZ=F")
+    _, data["wti_chg"], data["wti"] = f_wti.result()
+    _, data["brent_chg"], data["brent"] = f_brent.result()
+    _, data["copper_chg"], data["copper"] = f_copper.result()
+    _, data["gold_chg_str"], data["gold"] = f_gold.result()
+    _, data["silver_chg"], data["silver"] = f_silver.result()
     _, data["btc_chg_str"], data["btc"] = get_price_and_change("BTC-USD")
 
-    # VIX
-    _, _, data["vix"] = get_price_and_change("^VIX")
+    # VIX — 현물장 중이면 ^VIX(yfinance), 폐장 중이면 VIX 선물(Investing.com)
+    if US_CASH_OPEN:
+        _, data["vix_chg"], data["vix"] = get_price_and_change("^VIX")
+        data["vix_is_futures"] = False
+    else:
+        _, data["vix_chg"], data["vix"] = get_vix_futures_investing()
+        data["vix_is_futures"] = True
+        # 실패 시 ^VIX 마지막 종가로 폴백
+        if data["vix"] is None:
+            _, data["vix_chg"], data["vix"] = get_price_and_change("^VIX")
+            data["vix_is_futures"] = False
 
-    # 지수
-    data["dow_chg_str"], data["dow_chg"] = get_change_pct("^DJI")
-    data["nasdaq_chg_str"], data["nasdaq_chg"] = get_change_pct("^IXIC")
-    data["sp500_chg_str"], data["sp500_chg"] = get_change_pct("^GSPC")
-    data["russell_chg_str"], data["russell_chg"] = get_change_pct("^RUT")
-    data["nq_chg_str"], data["nq_chg"] = get_change_pct("NQ=F")       # E-mini 나스닥 선물
+    # 지수 — 현물장 중이면 현물(yfinance), 폐장 중이면 E-mini 선물(Yahoo 페이지 직접 스크랩)
+    idx_map_cash = {
+        "dow": "^DJI", "nasdaq": "^IXIC", "sp500": "^GSPC", "russell": "^RUT",
+    }
+    idx_map_fut = {
+        "dow":     ("https://finance.yahoo.com/quote/YM%3DF/",  "YM=F"),
+        "nasdaq":  ("https://finance.yahoo.com/quote/NQ%3DF/",  "NQ=F"),
+        "sp500":   ("https://finance.yahoo.com/quote/ES%3DF/",  "ES=F"),
+        "russell": ("https://finance.yahoo.com/quote/RTY%3DF/", "RTY=F"),
+    }
+    if US_CASH_OPEN:
+        for key, tkr in idx_map_cash.items():
+            data[f"{key}_chg_str"], data[f"{key}_chg"] = get_change_pct(tkr)
+    else:
+        with ThreadPoolExecutor(max_workers=4) as ex:
+            futs = {
+                key: ex.submit(scrape_yahoo_quote, url, sym)
+                for key, (url, sym) in idx_map_fut.items()
+            }
+        for key, f in futs.items():
+            _, pct_str, _, pct_val = f.result()
+            data[f"{key}_chg_str"], data[f"{key}_chg"] = pct_str, pct_val
+    data["indices_is_futures"] = not US_CASH_OPEN
+    # Micro E-mini 나스닥 선물 (Yahoo 페이지 직접 스크랩)
+    _, data["nq_chg_str"], _, data["nq_chg"] = scrape_yahoo_quote(
+        "https://finance.yahoo.com/quote/MNQ=F/", symbol="MNQ=F"
+    )
     data["kospi_night_chg_str"], data["kospi_night_chg"] = get_change_pct("KM=F")  # CME KOSPI 야간선물
 
     # 종합 점수 계산
     t_raw, data["t_risk"], data["spread"] = compute_t_risk(data["2y"], data["10y"], data["30y"])
     data["fx_risk"] = compute_fx_risk(data["dxy"], data["usd_jpy"], data["usd_cny"])
+    # 유가 평균 등락(WTI/Brent) — 모멘텀 입력
+    oil_chg_avg = avg_chg(data.get("wti_chg"), data.get("brent_chg"))
     data["c_risk"], data["oil_avg"], data["gc_ratio"] = compute_c_risk(
-        data["wti"], data["brent"], data["gold"], data["copper"]
+        data["wti"], data["brent"], data["gold"], data["copper"],
+        silver=data.get("silver"),
+        btc_chg=data.get("btc_chg_str"),
+        oil_chg=oil_chg_avg,
+        gold_chg=data.get("gold_chg_str"),
+        silver_chg=data.get("silver_chg"),
+        copper_chg=data.get("copper_chg"),
     )
     data["vix_score"] = compute_vix_score(data["vix"])
 
@@ -299,6 +560,54 @@ def collect_all_data():
         + data["vix_score"] * 0.20
     )
     data["macro_total"] = min(data["macro_total"], 100)
+
+    # 하위 지수 점수 변화 (어제 마지막 값 대비)
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    stored = {}
+    try:
+        if os.path.exists(MACRO_SNAPSHOT_PATH):
+            with open(MACRO_SNAPSHOT_PATH, "r", encoding="utf-8") as f:
+                stored = json.load(f)
+    except Exception:
+        stored = {}
+
+    current_scores = {
+        "t_risk": data["t_risk"],
+        "fx_risk": data["fx_risk"],
+        "c_risk": data["c_risk"],
+        "vix_score": data["vix_score"],
+        "macro_total": data["macro_total"],
+    }
+
+    # 구 포맷 호환: {"t_risk":..,"ts":..} → ts 날짜가 오늘이 아니면 baseline으로
+    if "today_latest" not in stored and "t_risk" in stored:
+        ts_date = (stored.get("ts") or "")[:10]
+        if ts_date and ts_date != today_str:
+            stored = {"yesterday_final": {k: stored[k] for k in current_scores if k in stored}}
+
+    # 저장된 today_latest의 날짜가 오늘이 아니면 → 그 값이 어제의 마지막 값
+    baseline = stored.get("yesterday_final") or {}
+    today_latest = stored.get("today_latest") or {}
+    if today_latest.get("date") and today_latest.get("date") != today_str:
+        baseline = {k: v for k, v in today_latest.items() if k != "date"}
+    # baseline 없으면 yfinance 일봉 전일 종가로부터 어제 점수 산출
+    if not baseline:
+        baseline = _compute_yesterday_baseline()
+
+    for k, v in current_scores.items():
+        bv = baseline.get(k)
+        data[f"{k}_delta"] = (v - bv) if (bv is not None and v is not None) else None
+
+    new_today = {**current_scores, "date": today_str}
+    try:
+        with open(MACRO_SNAPSHOT_PATH, "w", encoding="utf-8") as f:
+            json.dump({
+                "yesterday_final": baseline,
+                "today_latest": new_today,
+                "ts": datetime.now().isoformat(),
+            }, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
 
     return data
 
@@ -518,6 +827,11 @@ st.markdown(f"""
         content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
     }}
     .idx-card .idx-name {{ font-size: 11px; color: {TEXT_SECONDARY}; letter-spacing: 1px; margin: 0; }}
+    .idx-card .idx-info {{
+        display: inline-block; margin-left: 4px; color: {TEXT_SECONDARY};
+        opacity: 0.55; cursor: help; font-size: 11px; font-weight: normal;
+    }}
+    .idx-card .idx-info:hover {{ opacity: 1; color: #4da6ff; }}
     .idx-card .idx-val {{ font-size: 28px; font-weight: 700; margin: 6px 0 0 0; font-family: 'Consolas', monospace; }}
 
     /* 진단 박스 */
@@ -646,14 +960,23 @@ st.markdown("")
 st.markdown('<p class="section-title">매크로 분석</p>', unsafe_allow_html=True)
 
 sub_indices = [
-    ("T-RISK", "금리", d["t_risk"], 100, (25, 50, 75)),
-    ("FX-RISK", "환율", d["fx_risk"], 100, (30, 60, 85)),
-    ("C-RISK", "원자재", d["c_risk"], 100, (30, 60, 85)),
-    ("VIX", "위험심리", d["vix_score"], 100, (25, 50, 75)),
+    ("T-RISK", "금리", d["t_risk"], 100, (25, 50, 75), d.get("t_risk_delta")),
+    ("FX-RISK", "환율", d["fx_risk"], 100, (30, 60, 85), d.get("fx_risk_delta")),
+    ("C-RISK", "원자재", d["c_risk"], 100, (30, 60, 85), d.get("c_risk_delta")),
+    ("VIX", "위험심리", d["vix_score"], 100, (25, 50, 75), d.get("vix_score_delta")),
 ]
 
+def _delta_html(delta):
+    if delta is None:
+        return ""
+    if abs(delta) < 0.5:
+        return ' <span style="color:#888;font-size:0.6em;font-weight:normal;">(0)</span>'
+    color = "#e04b4b" if delta > 0 else "#3d7fe0"
+    sign = "+" if delta > 0 else ""
+    return f' <span style="color:{color};font-size:0.6em;font-weight:normal;">({sign}{delta:.0f})</span>'
+
 cols = st.columns(4)
-for col, (code, label, score, max_score, th) in zip(cols, sub_indices):
+for col, (code, label, score, max_score, th, delta) in zip(cols, sub_indices):
     g = risk_grade(score, th)
     sc = grade_css_color(g)
     pct = min(score / max_score * 100, 100)
@@ -663,7 +986,7 @@ for col, (code, label, score, max_score, th) in zip(cols, sub_indices):
             <div class="sub-card">
                 <div style="position:absolute;top:0;left:0;right:0;height:2px;background:{sc};"></div>
                 <p class="sc-label">{code}</p>
-                <p class="sc-score" style="color:{sc};">{score:.0f}</p>
+                <p class="sc-score" style="color:{sc};">{score:.0f}{_delta_html(delta)}</p>
                 <p class="sc-grade" style="color:{sc};">{label} · {g}</p>
                 <div class="sc-bar"><div class="sc-bar-fill" style="width:{pct:.0f}%;background:{sc};"></div></div>
             </div>
@@ -677,10 +1000,14 @@ st.markdown("")
 t_g = risk_grade(d["t_risk"], (25, 50, 75))
 with st.expander(f"금리 — T-Risk {d['t_risk']:.0f}점 · {t_g}"):
     rows = []
-    for label, key, val in [("US 2Y", "2Y", d["2y"]), ("US 10Y", "10Y", d["10y"]), ("US 30Y", "30Y", d["30y"])]:
+    for label, key, val, chg in [
+        ("US 2Y", "2Y", d["2y"], d.get("2y_chg")),
+        ("US 10Y", "10Y", d["10y"], d.get("10y_chg")),
+        ("US 30Y", "30Y", d["30y"], d.get("30y_chg")),
+    ]:
         if val is not None:
             g, _ = assess_risk(key, val)
-            rows.append((label, f"{val:.3f}%", badge_html(g)))
+            rows.append((label, f"{val:.3f}%{trend_arrow(chg)}", badge_html(g)))
     if d["spread"] is not None:
         sp = d["spread"]
         if sp < 0: sp_b = badge_html("위험")
@@ -693,13 +1020,13 @@ with st.expander(f"금리 — T-Risk {d['t_risk']:.0f}점 · {t_g}"):
 fx_g = risk_grade(d["fx_risk"], (30, 60, 85))
 with st.expander(f"환율 — FX-Risk {d['fx_risk']:.0f}점 · {fx_g}"):
     rows = []
-    for label, key, val, fmt in [
-        ("DXY", "DXY", d["dxy"], "{:.2f}"),
-        ("USD/JPY", "USD/JPY", d["usd_jpy"], "{:.2f}"),
-        ("USD/CNY", "USD/CNY", d["usd_cny"], "{:.4f}"),
+    for label, key, val, fmt, chg in [
+        ("DXY", "DXY", d["dxy"], "{:.2f}", d.get("dxy_chg")),
+        ("USD/JPY", "USD/JPY", d["usd_jpy"], "{:.2f}", d.get("usd_jpy_chg")),
+        ("USD/CNY", "USD/CNY", d["usd_cny"], "{:.4f}", d.get("usd_cny_chg")),
     ]:
         if val is not None:
-            v = fmt.format(val)
+            v = fmt.format(val) + trend_arrow(chg)
             b = badge_html(assess_risk(key, val)[0]) if key else "—"
             rows.append((label, v, b))
     st.markdown(detail_table(rows), unsafe_allow_html=True)
@@ -708,13 +1035,14 @@ with st.expander(f"환율 — FX-Risk {d['fx_risk']:.0f}점 · {fx_g}"):
 c_g = risk_grade(d["c_risk"], (30, 60, 85))
 with st.expander(f"원자재 — C-Risk {d['c_risk']:.0f}점 · {c_g}"):
     rows = []
-    for label, key, val, fmt in [
-        ("Brent Crude", "BRN", d["brent"], "${:.2f}"),
-        ("WTI Crude", "WTI", d["wti"], "${:.2f}"),
-        ("Copper (LME)", None, d["copper"], "${:,.0f}/톤"),
+    for label, key, val, fmt, chg in [
+        ("Brent Crude", "BRN", d["brent"], "${:.2f}", d.get("brent_chg")),
+        ("WTI Crude", "WTI", d["wti"], "${:.2f}", d.get("wti_chg")),
+        ("Copper (LME)", None, d["copper"], "${:,.0f}/톤", d.get("copper_chg")),
+        ("Silver", None, d.get("silver"), "${:.2f}", d.get("silver_chg")),
     ]:
         if val is not None:
-            v = fmt.format(val)
+            v = fmt.format(val) + trend_arrow(chg)
             b = badge_html(assess_risk(key, val)[0]) if key else "—"
             rows.append((label, v, b))
     if d["oil_avg"] is not None:
@@ -734,9 +1062,10 @@ with st.expander(f"위험 심리 — VIX Score {d['vix_score']:.0f}점 · {v_g}"
     rows = []
     if d["vix"] is not None:
         g, _ = assess_risk("VIX", d["vix"])
-        rows.append(("CBOE VIX", f"{d['vix']:.2f}", badge_html(g)))
+        vix_label = "CBOE VIX (선물)" if d.get("vix_is_futures") else "CBOE VIX"
+        rows.append((vix_label, f"{d['vix']:.2f}{trend_arrow(d.get('vix_chg'))}", badge_html(g)))
     if d["gold"] is not None:
-        rows.append(("Gold", f"${d['gold']:,.0f}", d.get("gold_chg_str", "")))
+        rows.append(("Gold", f"${d['gold']:,.0f}{trend_arrow(d.get('gold_chg_str'))}", d.get("gold_chg_str", "")))
     if d["btc"] is not None:
         rows.append(("Bitcoin", f"${d['btc']:,.0f}", d.get("btc_chg_str", "")))
     st.markdown(detail_table(rows), unsafe_allow_html=True)
@@ -744,17 +1073,25 @@ with st.expander(f"위험 심리 — VIX Score {d['vix_score']:.0f}점 · {v_g}"
 # ── 지수 동향 ──
 st.markdown('<p class="section-title">지수 현황</p>', unsafe_allow_html=True)
 
+_fut_sfx = " (선물)" if d.get("indices_is_futures") else ""
+_fut = d.get("indices_is_futures")
+_idx_src = {
+    "dow":     ("^DJI", "Dow Jones Industrial Average 현물", "yfinance")     if not _fut else ("YM=F",  "E-mini Dow 선물 (CBOT)", "yfinance"),
+    "nasdaq":  ("^IXIC", "NASDAQ Composite 현물", "yfinance")                if not _fut else ("NQ=F",  "E-mini NASDAQ-100 선물 (CME)", "yfinance"),
+    "sp500":   ("^GSPC", "S&P 500 현물", "yfinance")                         if not _fut else ("ES=F",  "E-mini S&P 500 선물 (CME)", "yfinance"),
+    "russell": ("^RUT", "Russell 2000 현물", "yfinance")                     if not _fut else ("RTY=F", "E-mini Russell 2000 선물 (CME)", "yfinance"),
+}
 indices = [
-    ("DOW JONES", d["dow_chg_str"], d["dow_chg"]),
-    ("NASDAQ", d["nasdaq_chg_str"], d["nasdaq_chg"]),
-    ("S&P 500", d["sp500_chg_str"], d["sp500_chg"]),
-    ("RUSSELL 2000", d["russell_chg_str"], d["russell_chg"]),
-    ("MINI NASDAQ (NQ=F)", d["nq_chg_str"], d["nq_chg"]),
-    ("KOSPI 야간선물", d["kospi_night_chg_str"], d["kospi_night_chg"]),
+    (f"DOW JONES{_fut_sfx}",    d["dow_chg_str"],     d["dow_chg"],     _idx_src["dow"]),
+    (f"NASDAQ{_fut_sfx}",       d["nasdaq_chg_str"],  d["nasdaq_chg"],  _idx_src["nasdaq"]),
+    (f"S&P 500{_fut_sfx}",      d["sp500_chg_str"],   d["sp500_chg"],   _idx_src["sp500"]),
+    (f"RUSSELL 2000{_fut_sfx}", d["russell_chg_str"], d["russell_chg"], _idx_src["russell"]),
+    ("MICRO NASDAQ",            d["nq_chg_str"],      d["nq_chg"],      ("MNQ=F", "Micro E-mini NASDAQ-100 선물 (CME)", "Yahoo Finance 페이지")),
+    ("KOSPI 야간선물",           d["kospi_night_chg_str"], d["kospi_night_chg"], ("KM=F", "CME KOSPI 야간 선물", "yfinance")),
 ]
 indices = [x for x in indices if x[2] is not None]
 idx_cols = st.columns(len(indices)) if indices else []
-for col, (name, chg_str, chg_val) in zip(idx_cols, indices):
+for col, (name, chg_str, chg_val, src) in zip(idx_cols, indices):
     with col:
         if chg_val is not None:
             if chg_val >= 2: ic = "#4da6ff"
@@ -762,10 +1099,12 @@ for col, (name, chg_str, chg_val) in zip(idx_cols, indices):
             elif chg_val >= 0: ic = COLOR_SAFE
             else: ic = COLOR_CRISIS
             arrow = "▲" if chg_val >= 0 else "▼"
+            tkr, desc, source = src
+            tooltip = f"티커: {tkr}&#10;출처: {source}&#10;{desc}"
             st.markdown(
                 f"""<div class="idx-card" style="border-color:{ic}40;">
                     <div style="position:absolute;top:0;left:0;right:0;height:2px;background:{ic};"></div>
-                    <p class="idx-name">{name}</p>
+                    <p class="idx-name">{name} <span class="idx-info" title="{tooltip}">ⓘ</span></p>
                     <p class="idx-val" style="color:{ic};">{arrow} {chg_str}</p>
                 </div>""",
                 unsafe_allow_html=True,
@@ -815,13 +1154,44 @@ TICKER_NAMES = {
     "028260.KS":"삼성물산",
 }
 
-@st.cache_data(ttl=3600)
-def analyze_trend_signals(all_tickers):
-    """종목별 추세 신호 분석 (daily bar 기준, 1시간 캐시)"""
+# 과거에 KOSPI200 스캔에서 Long sign 후 1주 유지되어 자동 편입된 종목
+_promoted_kr = load_json_safe(PROMOTED_KR_PATH)
+if _promoted_kr:
+    STOCK_UNIVERSE.setdefault("🇰🇷 신규 편입", [])
+    for _t, _info in _promoted_kr.items():
+        if _t not in STOCK_UNIVERSE["🇰🇷 신규 편입"]:
+            STOCK_UNIVERSE["🇰🇷 신규 편입"].append(_t)
+        TICKER_NAMES.setdefault(_t, _info.get("name", _t))
+
+@st.cache_data(ttl=300)
+def analyze_trend_signals(all_tickers, with_live=True):
+    """종목별 추세 신호 분석 (daily bar, 선택적 장중 라이브 가격 합성, 5분 캐시).
+    with_live=False 시 라이브 1분봉 다운로드 스킵 (대규모 스캔용).
+    """
     try:
         data = yf.download(all_tickers, period="1y", auto_adjust=True, progress=False, group_by="ticker")
     except Exception:
         return {}
+
+    # 장중 라이브 가격 일괄 수집 (추적 종목 전용)
+    live_prices = {}
+    if with_live:
+        try:
+            live_data = yf.download(all_tickers, period="1d", interval="1m",
+                                    progress=False, group_by="ticker", prepost=True)
+            for t in all_tickers:
+                try:
+                    if len(all_tickers) == 1:
+                        c = live_data["Close"].dropna()
+                    else:
+                        c = live_data[t]["Close"].dropna()
+                    if len(c):
+                        live_prices[t] = float(c.iloc[-1])
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
     results = {}
     for t in all_tickers:
         try:
@@ -831,6 +1201,11 @@ def analyze_trend_signals(all_tickers):
                 close = data[t]["Close"].dropna()
             if len(close) < 200:
                 continue
+            # 마지막 일봉을 장중 라이브 가격으로 교체 (오늘 종가 대용)
+            live = live_prices.get(t)
+            if live is not None and live > 0:
+                close = close.copy()
+                close.iloc[-1] = live
             ma50 = close.rolling(50).mean()
             ma200 = close.rolling(200).mean()
             last = close.iloc[-1]
@@ -1050,9 +1425,10 @@ def _fmt_row(t, info):
             f'<span style="color:#ffb347;font-size:0.8em;background:#3a2a0a;padding:1px 6px;'
             f'border-radius:3px;margin-left:6px;border:1px solid #d4a843;">🔔 {before}→{after}</span>'
         )
+    new_html = NEW_BADGE_HTML if ("NEW_LONG_TICKERS" in globals() and t in NEW_LONG_TICKERS) else ""
     return (
         f'<div style="display:flex;justify-content:space-between;padding:4px 8px;border-bottom:1px solid #2a2a2a;">'
-        f'<span><strong>{name}</strong> <span style="color:#888;font-size:0.85em;">{t}</span>{sector_html}{change_html}</span>'
+        f'<span><strong>{name}</strong> <span style="color:#888;font-size:0.85em;">{t}</span>{sector_html}{change_html}{new_html}</span>'
         f'<span style="color:{color};">{arrow} {info["chg"]:+.2f}% &nbsp; ${info["last"]:,.2f}</span>'
         f'</div>'
     )
@@ -1205,7 +1581,7 @@ def get_market_caps(tickers):
             continue
     return caps
 
-@st.cache_data(ttl=21600)  # 6시간 캐시
+@st.cache_data(ttl=3600)  # 1시간 캐시
 def scan_sp500_long_signs(exclude_set):
     """S&P500 중 추적 종목 외에서 Long sign 발생 종목 스캔"""
     try:
@@ -1221,11 +1597,11 @@ def scan_sp500_long_signs(exclude_set):
         sector_map = dict(zip(sp500_df["Ticker"], sp500_df["GICS Sector"]))
     except Exception as e:
         return {}, {}, str(e)
-    sig_new = analyze_trend_signals(candidates)
+    sig_new = analyze_trend_signals(candidates, with_live=False)
     long_only = {t: info for t, info in sig_new.items() if info["tag"] == "long"}
     return long_only, sector_map, None
 
-@st.cache_data(ttl=21600)
+@st.cache_data(ttl=3600)  # 1시간 캐시
 def scan_kospi200_long_signs(exclude_set):
     """KOSPI 200 중 추적 종목 외에서 Long sign 발생 종목 스캔 (네이버 금융)"""
     try:
@@ -1248,7 +1624,7 @@ def scan_kospi200_long_signs(exclude_set):
         return {}, {}, str(e)
     yf_tickers = [t + ".KS" for t in tickers]
     candidates = [t for t in yf_tickers if t not in exclude_set]
-    sig = analyze_trend_signals(candidates)
+    sig = analyze_trend_signals(candidates, with_live=False)
     long_only = {t: info for t, info in sig.items() if info["tag"] == "long"}
     # code.KS → 한글명 매핑
     name_out = {t: name_map.get(t.replace(".KS", ""), t) for t in long_only}
@@ -1266,6 +1642,84 @@ with st.spinner("KOSPI 200 신규 Long Sign 스캔 중..."):
 
 # 한글명 임시 병합 (_fmt_row 에서 조회)
 TICKER_NAMES.update(kr_name_map)
+
+
+def manage_kr_promotions(kr_long_map, name_map):
+    """KOSPI200 Long sign이 1주(7일) 이상 고점 유지되면 추적 리스트로 승격.
+    변곡점 깨짐 정의: 주봉 기준 Long sign 당시 종가 대비 -3% 이탈 또는 sell/short 태그 전환.
+    """
+    tracker = load_json_safe(KR_PROMO_TRACKER_PATH)
+    promoted = load_json_safe(PROMOTED_KR_PATH)
+    today = datetime.now().date()
+
+    # 신규 Long sign 등록
+    for t, info in kr_long_map.items():
+        if t in promoted or t in tracker:
+            continue
+        tracker[t] = {
+            "first_long_date": today.isoformat(),
+            "trigger_close": float(info.get("last") or 0),
+            "name": name_map.get(t, t),
+        }
+
+    if not tracker:
+        save_json_safe(KR_PROMO_TRACKER_PATH, tracker)
+        return {}
+
+    # 추적 중 종목 현재 상태 조회
+    cur_sig = analyze_trend_signals(list(tracker.keys()))
+
+    to_delete = []
+    newly_promoted = {}
+    for t, entry in list(tracker.items()):
+        first = datetime.fromisoformat(entry["first_long_date"]).date()
+        days_elapsed = (today - first).days
+        cur = cur_sig.get(t) or {}
+        trigger = entry.get("trigger_close", 0) or 0
+        last_close = cur.get("last")
+        tag = cur.get("tag", "")
+        # 변곡점 깨짐: 종가가 트리거 대비 -3% 이탈 OR sell/short 전환
+        broken = False
+        if last_close is not None and trigger > 0 and last_close < trigger * 0.97:
+            broken = True
+        if tag in ("sell", "short", "hold_sell"):
+            broken = True
+        if broken:
+            to_delete.append(t)
+            continue
+        if days_elapsed >= 7:
+            newly_promoted[t] = {
+                "name": entry.get("name", t),
+                "promotion_date": today.isoformat(),
+                "trigger_close": trigger,
+            }
+            to_delete.append(t)
+
+    for t in to_delete:
+        tracker.pop(t, None)
+
+    save_json_safe(KR_PROMO_TRACKER_PATH, tracker)
+    if newly_promoted:
+        promoted.update(newly_promoted)
+        save_json_safe(PROMOTED_KR_PATH, promoted)
+    return newly_promoted
+
+
+_newly_promoted = manage_kr_promotions(kr_longs, kr_name_map)
+if _newly_promoted:
+    names = ", ".join(info.get("name", t) for t, info in _newly_promoted.items())
+    st.success(f"🆕 추적 리스트 편입 ({len(_newly_promoted)}개): {names} — 다음 재실행부터 반영")
+
+# 10분 자동 갱신 기준으로 신규 등장 Long sign 종목 탐지
+_prev_seen = set(load_json_safe(LONG_SIGN_SEEN_PATH).get("seen", []))
+_current_long_set = set(us_longs.keys()) | set(kr_longs.keys())
+NEW_LONG_TICKERS = _current_long_set - _prev_seen if _prev_seen else set()
+save_json_safe(LONG_SIGN_SEEN_PATH, {"seen": sorted(_current_long_set)})
+
+NEW_BADGE_HTML = (
+    '<span style="color:#fff;font-size:0.75em;background:#e04b4b;padding:1px 6px;'
+    'border-radius:3px;margin-left:6px;font-weight:700;letter-spacing:0.5px;">NEW</span>'
+)
 
 # ── 미국 ──
 if us_err:
@@ -1306,10 +1760,11 @@ else:
                         name = TICKER_NAMES.get(t, t)
                         arrow = "▲" if i["chg"] >= 0 else "▼"
                         color = COLOR_SAFE if i["chg"] >= 0 else COLOR_CRISIS
+                        new_badge = NEW_BADGE_HTML if t in NEW_LONG_TICKERS else ""
                         st.markdown(
                             f'<div style="display:flex;justify-content:space-between;padding:4px 8px;border-bottom:1px solid #2a2a2a;">'
                             f'<span><strong>{name}</strong> <span style="color:#888;font-size:0.85em;">{t}</span> '
-                            f'<span style="color:#aaa;font-size:0.8em;">· {mc_str}</span></span>'
+                            f'<span style="color:#aaa;font-size:0.8em;">· {mc_str}</span>{new_badge}</span>'
                             f'<span style="color:{color};">{arrow} {i["chg"]:+.2f}% &nbsp; ${i["last"]:,.2f}</span>'
                             f'</div>',
                             unsafe_allow_html=True,
