@@ -40,8 +40,13 @@ def save_json_safe(path, obj):
 st.set_page_config(page_title="시장 위험 진단", page_icon="📊", layout="wide")
 
 # 장중에만 30초 자동 갱신 (휴장일·장외시간 제외)
+def _kst_now():
+    from zoneinfo import ZoneInfo
+    return datetime.now(ZoneInfo("Asia/Seoul"))
+
+
 def is_market_open():
-    now = datetime.now()
+    now = _kst_now()
     # 주말 제외 (월=0 ~ 금=4)
     if now.weekday() >= 5:
         return False
@@ -56,7 +61,7 @@ def is_market_open():
 
 def is_us_cash_open():
     # 미국 현물장 (KST 월~금 22:30~05:00, 요일 경계 처리)
-    now = datetime.now()
+    now = _kst_now()
     from datetime import time as dtime
     t = now.time()
     wd = now.weekday()
