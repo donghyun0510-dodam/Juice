@@ -1061,17 +1061,6 @@ st.markdown(f"""
         .detail-table th, .detail-table td {{ padding: 6px 4px !important; }}
     }}
 
-    @media (max-width: 420px) {{
-        [data-testid="stColumn"],
-        [data-testid="column"],
-        div[data-testid="stColumn"],
-        .stColumn,
-        [data-testid="stHorizontalBlock"] > div {{
-            min-width: 100% !important;
-            flex: 1 1 100% !important;
-            width: 100% !important;
-        }}
-    }}
 </style>
 """, unsafe_allow_html=True)
 
