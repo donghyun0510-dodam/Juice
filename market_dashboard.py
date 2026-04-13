@@ -1154,6 +1154,29 @@ TICKER_NAMES = {
     "028260.KS":"삼성물산",
 }
 
+# 증시 리뷰 스프레드시트에서 추적 종목 읽기 (source of truth, 실패 시 하드코딩 폴백)
+try:
+    from sheet_tickers import load_tracking_tickers_from_sheet
+
+    @st.cache_data(ttl=3600)
+    def _cached_sheet_tickers():
+        return load_tracking_tickers_from_sheet()
+
+    _sheet_universe, _sheet_names = _cached_sheet_tickers()
+    if _sheet_universe:
+        _has_us = any(k.startswith("🇺🇸") for k in _sheet_universe)
+        _has_kr = any(k.startswith("🇰🇷") for k in _sheet_universe)
+        # 시트에 있는 쪽만 하드코딩을 대체 (없으면 기존 유지)
+        if _has_us:
+            STOCK_UNIVERSE = {k: v for k, v in STOCK_UNIVERSE.items() if not k.startswith("🇺🇸")}
+        if _has_kr:
+            STOCK_UNIVERSE = {k: v for k, v in STOCK_UNIVERSE.items() if not k.startswith("🇰🇷")}
+        for k, v in _sheet_universe.items():
+            STOCK_UNIVERSE[k] = v
+        TICKER_NAMES.update(_sheet_names)
+except Exception:
+    pass
+
 # 과거에 KOSPI200 스캔에서 Long sign 후 1주 유지되어 자동 편입된 종목
 _promoted_kr = load_json_safe(PROMOTED_KR_PATH)
 if _promoted_kr:
@@ -1566,7 +1589,7 @@ _sign_section("hold_sell", "⛔ 하락 추세 지속", hold_sell,
 
 
 # ── 개별주식 2 - 신규 Long Sign 특징주 ──
-st.markdown('<p class="section-title">개별 주식 2 — 신규 Long Sign (특징주)</p>', unsafe_allow_html=True)
+# (섹션 타이틀·diff 배너는 scan 및 LAST_DIFF 계산 이후로 이동됨)
 
 @st.cache_data(ttl=86400)
 def get_market_caps(tickers):
@@ -1602,32 +1625,65 @@ def scan_sp500_long_signs(exclude_set):
     return long_only, sector_map, None
 
 @st.cache_data(ttl=3600)  # 1시간 캐시
-def scan_kospi200_long_signs(exclude_set):
-    """KOSPI 200 중 추적 종목 외에서 Long sign 발생 종목 스캔 (네이버 금융)"""
+def scan_kr_long_signs(exclude_set):
+    """KOSPI + KOSDAQ 중 시총 2조원 이상, 추적 외에서 Long sign 발생 종목 스캔.
+    네이버 금융 시총 순위 페이지에서 2조원 이상 종목 수집 (ETF/ETN 제외)."""
+    from bs4 import BeautifulSoup
+    candidates = []
+    name_map = {}
     try:
-        import pandas as pd
-        from io import StringIO
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-        tickers, name_map = [], {}
-        for page in range(1, 12):  # KOSPI200 약 10페이지
-            url = f"https://finance.naver.com/sise/entryJongmok.naver?code=KPI200&page={page}"
-            r = req.get(url, headers=headers, timeout=10)
-            r.encoding = "euc-kr"
-            matches = re.findall(r'code=(\d{6})[^>]*>([^<]+)</a>', r.text)
-            if not matches:
-                break
-            for code, name in matches:
-                tickers.append(code)
-                name_map[code] = name.strip()
-        tickers = list(dict.fromkeys(tickers))  # 중복 제거
+        for market in ["0", "1"]:  # 0=KOSPI, 1=KOSDAQ
+            for page in range(1, 5):
+                url = f"https://finance.naver.com/sise/sise_market_sum.naver?sosok={market}&page={page}"
+                resp = req.get(url, headers=headers, timeout=15)
+                resp.encoding = "euc-kr"
+                soup = BeautifulSoup(resp.text, "html.parser")
+                for row in soup.select("table.type_2 tr"):
+                    tds = row.select("td")
+                    if len(tds) < 7:
+                        continue
+                    a = tds[1].select_one("a")
+                    if not a:
+                        continue
+                    name = a.get_text(strip=True)
+                    href = a.get("href", "")
+                    cm = re.search(r"code=(\d{6})(?!\w)", href)
+                    if not cm:
+                        continue
+                    code = cm.group(1)
+                    suffix = ".KQ" if market == "1" else ".KS"
+                    ticker = code + suffix
+                    mcap_text = tds[6].get_text(strip=True).replace(",", "")
+                    try:
+                        mcap_100m = int(mcap_text)  # 억원 단위
+                    except ValueError:
+                        continue
+                    if mcap_100m < 20000:  # 2조원 = 20000억원
+                        continue
+                    # ETF/ETN 제외
+                    if any(kw in name for kw in [
+                        "KODEX", "TIGER", "KBSTAR", "ARIRANG", "SOL", "HANARO",
+                        "ACE", "KOSEF", "TREX", "RISE", "PLUS",
+                        "ETN", "ETF", "인버스", "레버리지", "합성",
+                    ]):
+                        continue
+                    if ticker in exclude_set:
+                        continue
+                    candidates.append(ticker)
+                    name_map[ticker] = name
     except Exception as e:
         return {}, {}, str(e)
-    yf_tickers = [t + ".KS" for t in tickers]
-    candidates = [t for t in yf_tickers if t not in exclude_set]
+    candidates = list(dict.fromkeys(candidates))
     sig = analyze_trend_signals(candidates, with_live=False)
     long_only = {t: info for t, info in sig.items() if info["tag"] == "long"}
-    # code.KS → 한글명 매핑
-    name_out = {t: name_map.get(t.replace(".KS", ""), t) for t in long_only}
+    # 시총 정보 주입 (위에서 구한 억원 값 대신 fast_info로 정확한 KRW)
+    for t, info in long_only.items():
+        try:
+            info["mcap"] = yf.Ticker(t).fast_info.get("market_cap") or 0
+        except Exception:
+            info["mcap"] = 0
+    name_out = {t: name_map.get(t, t) for t in long_only}
     return long_only, name_out, None
 
 exclude_set = set(all_tk)
@@ -1636,9 +1692,9 @@ exclude_set = set(all_tk)
 with st.spinner("S&P 500 신규 Long Sign 스캔 중 (최초 1회 수십 초 소요)..."):
     us_longs, sector_map, us_err = scan_sp500_long_signs(exclude_set)
 
-# 한국 KOSPI 200
-with st.spinner("KOSPI 200 신규 Long Sign 스캔 중..."):
-    kr_longs, kr_name_map, kr_err = scan_kospi200_long_signs(exclude_set)
+# 한국 (KOSPI + KOSDAQ, 시총 2조원+)
+with st.spinner("한국 신규 Long Sign 스캔 중 (KOSPI+KOSDAQ, 시총 2조원+ 필터)..."):
+    kr_longs, kr_name_map, kr_err = scan_kr_long_signs(exclude_set)
 
 # 한글명 임시 병합 (_fmt_row 에서 조회)
 TICKER_NAMES.update(kr_name_map)
@@ -1711,15 +1767,87 @@ if _newly_promoted:
     st.success(f"🆕 추적 리스트 편입 ({len(_newly_promoted)}개): {names} — 다음 재실행부터 반영")
 
 # 10분 자동 갱신 기준으로 신규 등장 Long sign 종목 탐지
-_prev_seen = set(load_json_safe(LONG_SIGN_SEEN_PATH).get("seen", []))
+# 저장 갱신은 9분 이상 경과 시에만 수행 → 자동새로고침 주기 동안 NEW 배지 유지
+_seen_data = load_json_safe(LONG_SIGN_SEEN_PATH)
+_prev_seen = set(_seen_data.get("seen", []))
 _current_long_set = set(us_longs.keys()) | set(kr_longs.keys())
 NEW_LONG_TICKERS = _current_long_set - _prev_seen if _prev_seen else set()
-save_json_safe(LONG_SIGN_SEEN_PATH, {"seen": sorted(_current_long_set)})
+REMOVED_LONG_TICKERS = _prev_seen - _current_long_set if _prev_seen else set()
+
+# 확정된 diff (직전 갱신 사이클에서 발생한 변화) — UI 표시용
+LAST_DIFF = {
+    "added": _seen_data.get("last_added", []),
+    "removed": _seen_data.get("last_removed", []),
+    "prev_count": _seen_data.get("last_prev_count"),
+    "cur_count": _seen_data.get("last_cur_count"),
+    "ts": _seen_data.get("last_diff_ts"),
+}
+
+_prev_ts = _seen_data.get("ts")
+_should_update = True
+if _prev_ts:
+    try:
+        _elapsed = (datetime.now() - datetime.fromisoformat(_prev_ts)).total_seconds()
+        _should_update = _elapsed >= 540  # 9분
+    except Exception:
+        _should_update = True
+
+if _should_update:
+    # diff가 있는 경우에만 last_* 필드를 갱신, 없으면 이전 diff 유지
+    has_change = bool(NEW_LONG_TICKERS or REMOVED_LONG_TICKERS)
+    save_json_safe(LONG_SIGN_SEEN_PATH, {
+        "seen": sorted(_current_long_set),
+        "ts": datetime.now().isoformat(),
+        "last_added": sorted(NEW_LONG_TICKERS) if has_change else _seen_data.get("last_added", []),
+        "last_removed": sorted(REMOVED_LONG_TICKERS) if has_change else _seen_data.get("last_removed", []),
+        "last_prev_count": len(_prev_seen) if has_change else _seen_data.get("last_prev_count"),
+        "last_cur_count": len(_current_long_set) if has_change else _seen_data.get("last_cur_count"),
+        "last_diff_ts": datetime.now().isoformat() if has_change else _seen_data.get("last_diff_ts"),
+    })
+    if has_change:
+        LAST_DIFF = {
+            "added": sorted(NEW_LONG_TICKERS),
+            "removed": sorted(REMOVED_LONG_TICKERS),
+            "prev_count": len(_prev_seen),
+            "cur_count": len(_current_long_set),
+            "ts": datetime.now().isoformat(),
+        }
 
 NEW_BADGE_HTML = (
     '<span style="color:#fff;font-size:0.75em;background:#e04b4b;padding:1px 6px;'
     'border-radius:3px;margin-left:6px;font-weight:700;letter-spacing:0.5px;">NEW</span>'
 )
+
+# 섹션 타이틀 (직전 변화 배너는 한국 신규 Long Sign 아래에 표시)
+st.markdown('<p class="section-title">개별 주식 2 — 신규 Long Sign (특징주)</p>', unsafe_allow_html=True)
+
+def _render_last_diff_banner():
+    if not (LAST_DIFF.get("added") or LAST_DIFF.get("removed")):
+        return
+    def _names(tickers):
+        out = []
+        for t in tickers:
+            nm = TICKER_NAMES.get(t, t)
+            out.append(f"{nm}({t})" if nm != t else t)
+        return ", ".join(out) if out else "—"
+    _prev_n = LAST_DIFF.get("prev_count")
+    _cur_n = LAST_DIFF.get("cur_count")
+    _ts = (LAST_DIFF.get("ts") or "")[:19].replace("T", " ")
+    _parts = []
+    if _prev_n is not None and _cur_n is not None:
+        _parts.append(f"<strong>{_prev_n} → {_cur_n}</strong>")
+    if LAST_DIFF.get("added"):
+        _parts.append(f'🟢 신규 {len(LAST_DIFF["added"])}: {_names(LAST_DIFF["added"])}')
+    if LAST_DIFF.get("removed"):
+        _parts.append(f'🔻 제외 {len(LAST_DIFF["removed"])}: {_names(LAST_DIFF["removed"])}')
+    st.markdown(
+        f'<div style="background:#1a1a1a;border-left:3px solid #4da6ff;padding:8px 12px;'
+        f'margin-top:8px;font-size:0.9em;color:#ccc;">'
+        f'직전 변화 <span style="color:#888;font-size:0.8em;">({_ts})</span> — '
+        + " &nbsp;•&nbsp; ".join(_parts) +
+        '</div>',
+        unsafe_allow_html=True,
+    )
 
 # ── 미국 ──
 if us_err:
@@ -1783,14 +1911,15 @@ else:
         with st.popover("❓", use_container_width=True):
             st.markdown(SIGN_CRITERIA["long"])
             st.markdown("---")
-            st.markdown("**스캔 대상**: KOSPI 200 전체 종목 (추적 종목 제외)\n\n**데이터 소스**: 네이버 금융\n\n**갱신 주기**: 6시간")
+            st.markdown("**스캔 대상**: KOSPI + KOSDAQ (추적 종목 제외, 시총 2조원+, ETF/ETN 제외)\n\n**데이터 소스**: 네이버 금융\n\n**갱신 주기**: 1시간")
     with c1:
-        with st.expander(f"🇰🇷 KOSPI 200 신규 Long Sign ({len(kr_longs)}개)", expanded=False):
+        with st.expander(f"🇰🇷 한국 신규 Long Sign ({len(kr_longs)}개)", expanded=False):
             if kr_longs:
                 sorted_hits = sorted(kr_longs.items(), key=lambda x: -x[1]["chg"])
                 st.markdown("".join(_fmt_row(t, i) for t, i in sorted_hits), unsafe_allow_html=True)
             else:
                 st.markdown("_신규 Long sign 발생 종목 없음_")
+            _render_last_diff_banner()
 
 
 # ── 새로고침 ──

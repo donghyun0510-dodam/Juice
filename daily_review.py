@@ -509,22 +509,23 @@ def compute_macro_composite(t_risk_score, fx_risk_score, c_risk_score, vix_val):
     print(f"  매크로 종합: 금리={t_risk_score:.0f} 환율={fx_risk_score:.0f} 원자재={c_risk_score:.0f} VIX={vix_score:.0f} → {total:.0f}점")
 
     if total <= 25:
-        return f"안정({total:.0f}점)", GREEN
+        return f"안정({total:.0f}점)", GREEN, total, vix_score
     elif total <= 50:
-        return f"주의({total:.0f}점)", YELLOW
+        return f"주의({total:.0f}점)", YELLOW, total, vix_score
     elif total <= 75:
-        return f"위험({total:.0f}점)", ORANGE
+        return f"위험({total:.0f}점)", ORANGE, total, vix_score
     else:
-        return f"고위험({total:.0f}점)", RED
+        return f"고위험({total:.0f}점)", RED, total, vix_score
 
 
 def scan_featured_stocks(existing_tickers):
-    """S&P 500에서 기존 추적 종목 외, 시가총액 $165억+ & 특이사항 보인 종목 스캔"""
+    """S&P 500 중 추적 외 + 시총 $50B+ + Long Sign 종목 스캔
+    (대시보드 '개별 주식 2 신규 Long Sign'과 동일 기준)"""
     import pandas as pd
+    from market_common import analyze_trend_signals as common_trend_signals
 
-    print("  특징주 스캔 중 (S&P 500 대상)...")
+    print("  특징주 스캔 중 (S&P 500, 대시보드와 동일 기준)...")
 
-    # S&P 500 종목 리스트
     try:
         from io import StringIO
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
@@ -533,7 +534,6 @@ def scan_featured_stocks(existing_tickers):
         sp500_df = tables[0]
         sp500_df["Ticker"] = sp500_df["Symbol"].str.replace(".", "-", regex=False)
         sp500 = sp500_df["Ticker"].tolist()
-        # 섹터 매핑 (ticker → GICS Sector)
         sector_map = dict(zip(sp500_df["Ticker"], sp500_df["GICS Sector"]))
     except Exception as e:
         print(f"    S&P 500 목록 가져오기 실패: {e}")
@@ -543,61 +543,25 @@ def scan_featured_stocks(existing_tickers):
     candidates = [t for t in sp500 if t not in existing]
     print(f"    스캔 대상: {len(candidates)}개 종목")
 
-    # 1년 데이터 벌크 다운로드
-    try:
-        data = yf.download(candidates, period="1y", progress=False)
-        close = data["Close"]
-    except Exception:
-        return []
+    sig = common_trend_signals(candidates)
+    long_only = {t: info for t, info in sig.items() if info.get("tag") == "long"}
+    print(f"    Long Sign 감지: {len(long_only)}개")
 
     featured = []
-
-    for ticker in candidates:
+    MCAP_MIN = 50_000_000_000  # $50B (대시보드와 동일)
+    for ticker, info in long_only.items():
         try:
-            col = close[ticker].dropna()
-            if len(col) < 200:
-                continue
-
-            current = col.iloc[-1]
-            prev_close = col.iloc[-2]
-            pct = (current - prev_close) / prev_close * 100
-
-            high_52w = col.max()
-            low_52w = col.min()
-
-            notes = []
-
-            # Long Sign 해당 항목만: 52주 신고가, 골든크로스
-            if current >= high_52w:
-                notes.append("52주 신고가")
-
-            ma50 = col.rolling(50).mean()
-            ma200 = col.rolling(200).mean()
-            if len(ma50.dropna()) >= 2 and len(ma200.dropna()) >= 2:
-                prev_diff = ma50.iloc[-2] - ma200.iloc[-2]
-                curr_diff = ma50.iloc[-1] - ma200.iloc[-1]
-                if prev_diff <= 0 and curr_diff > 0:
-                    notes.append("골든크로스")
-
-            if not notes:
-                continue
-
-            # 시가총액 필터 ($165억 이상)
-            try:
-                tk_info = yf.Ticker(ticker)
-                mcap = getattr(tk_info.fast_info, "market_cap", None)
-                if mcap is None or mcap < 16_500_000_000:
-                    continue
-            except Exception:
-                continue
-
-            sector = sector_map.get(ticker, "")
-            featured.append((ticker, f"{pct:+.2f}%", " / ".join(notes), "Long Sign", sector))
-
+            tk_info = yf.Ticker(ticker)
+            mcap = getattr(tk_info.fast_info, "market_cap", None) or 0
         except Exception:
+            mcap = 0
+        if mcap < MCAP_MIN:
             continue
+        sector = sector_map.get(ticker, "")
+        pct = info.get("chg", 0.0)
+        featured.append((ticker, f"{pct:+.2f}%", "Long Sign", "Long Sign", sector))
 
-    print(f"    특징주 {len(featured)}개 발견")
+    print(f"    특징주 {len(featured)}개 ($50B+ 필터 적용)")
     return featured
 
 
@@ -642,6 +606,18 @@ def build_global_sheet(target_date):
     sp500_chg = get_change_pct("^GSPC")
     russell_chg = get_change_pct("^RUT")
 
+    # 섹터/종목 — 기존 시트가 있으면 그 종목 리스트를 우선 사용 (source of truth)
+    _sheet_us_sectors = {}
+    try:
+        from sheet_tickers import load_tracking_tickers_from_sheet
+        _u, _ = load_tracking_tickers_from_sheet()
+        for _label, _tks in _u.items():
+            if _label.startswith("🇺🇸"):
+                _sec = _label.replace("🇺🇸", "").strip() or "기타"
+                _sheet_us_sectors.setdefault(_sec, []).extend(_tks)
+    except Exception:
+        pass
+
     # 섹터/종목 - 미국 개별종목 등락률
     us_stocks = {
         # 반도체
@@ -678,6 +654,9 @@ def build_global_sheet(target_date):
         # 친환경
         "NEE": "NEE",
     }
+    if _sheet_us_sectors:
+        us_stocks = {t: t for tks in _sheet_us_sectors.values() for t in tks}
+        print(f"  시트에서 미국 추적 종목 {len(us_stocks)}개 로드 (하드코딩 덮어씀)")
 
     # 일괄 다운로드
     print("  미국 종목 데이터 다운로드 중...")
@@ -791,8 +770,11 @@ def build_global_sheet(target_date):
     except Exception as e:
         print(f"  스냅샷 저장 실패: {e}")
 
-    # 섹터별 종목 그룹
-    sector_groups = [
+    # 섹터별 종목 그룹 (시트가 source of truth면 시트 구조 사용)
+    if _sheet_us_sectors:
+        sector_groups = [(s, tks) for s, tks in _sheet_us_sectors.items()]
+    else:
+     sector_groups = [
         ("반도체", ["SOX", "INTC", "AMD", "ARM", "AMAT", "ASML", "LRCX", "MU", "TXN", "NVDA", "AVGO", "MRVL", "COHR", "SNDK"]),
         ("하드웨어", ["DELL", "ANET", "CSCO"]),
         ("빅테크", ["ORCL", "AAPL", "MSFT", "AMZN", "GOOG", "META", "NFLX"]),
@@ -853,7 +835,35 @@ def build_global_sheet(target_date):
     )
     vix_val = parse_price(vix_price)
     vix_risk, vix_color = assess_risk("VIX", vix_val)
-    macro_label, macro_color = compute_macro_composite(t_risk_score, fx_risk_score, c_risk_score, vix_val)
+    macro_label, macro_color, macro_total_val, vix_score_val = compute_macro_composite(
+        t_risk_score, fx_risk_score, c_risk_score, vix_val
+    )
+
+    # 성과 추적용 메트릭 (스카우터_성과자료 시트에 누적 기록)
+    try:
+        sp_hist = yf.Ticker("^GSPC").history(period="5d")
+        sp500_close = float(sp_hist["Close"].iloc[-1]) if len(sp_hist) >= 1 else None
+        sp500_chg_pct = (
+            (sp500_close / float(sp_hist["Close"].iloc[-2]) - 1) * 100
+            if len(sp_hist) >= 2 else None
+        )
+    except Exception:
+        sp500_close, sp500_chg_pct = None, None
+    oil_avg_val = (wti_val + brent_val) / 2 if (wti_val is not None and brent_val is not None) else None
+    perf_metrics = {
+        "date": target_date.strftime("%Y-%m-%d"),
+        "t_risk": round(t_risk_score, 1) if t_risk_score is not None else "",
+        "fx_risk": round(fx_risk_score, 1) if fx_risk_score is not None else "",
+        "c_risk": round(c_risk_score, 1) if c_risk_score is not None else "",
+        "vix_score": round(vix_score_val, 1) if vix_score_val is not None else "",
+        "macro_total": round(macro_total_val, 1) if macro_total_val is not None else "",
+        "vix": round(vix_val, 2) if vix_val is not None else "",
+        "dxy": round(dxy_val, 2) if dxy_val is not None else "",
+        "us_10y": round(bond_10y_val, 3) if bond_10y_val is not None else "",
+        "oil_avg": round(oil_avg_val, 2) if oil_avg_val is not None else "",
+        "sp500_close": round(sp500_close, 2) if sp500_close is not None else "",
+        "sp500_chg_pct": round(sp500_chg_pct, 2) if sp500_chg_pct is not None else "",
+    }
 
     # 시트 데이터 구성
     rows = []
@@ -1012,7 +1022,7 @@ def build_global_sheet(target_date):
     rows.append(["7.결론", "투자 관점", "위험 시그널", "", ""])
     rows.append(["", "주도 섹터", "핵심 종목", "", ""])
 
-    return rows, risk_cells, color_cells
+    return rows, risk_cells, color_cells, perf_metrics
 
 
 def assess_kr_risk(indicator, value):
@@ -1199,102 +1209,75 @@ def compute_kr_macro_risk(krw_risk_total, bond_3y_val, wti_val):
 
 
 def scan_kr_featured_stocks(existing_tickers):
-    """한국 시총 2조+ 종목 중, 기존 추적 제외, Long Sign 발생 종목 스캔"""
-    print("  한국 특징주 스캔 중 (시총 2조+ 대상)...")
+    """KOSPI + KOSDAQ 중 추적 외 + 시총 2조원+ + Long Sign 종목 스캔
+    (대시보드 '개별 주식 2 신규 Long Sign'과 동일 기준)"""
+    from market_common import analyze_trend_signals as common_trend_signals
 
-    # 네이버 금융에서 시총 2조 이상 종목 수집
+    print("  한국 특징주 스캔 중 (KOSPI+KOSDAQ, 시총 2조원+, 대시보드와 동일 기준)...")
+
     candidates = []
+    name_map = {}
     existing = set(existing_tickers)
     try:
-        for market in ['0', '1']:  # 0=KOSPI, 1=KOSDAQ
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        for market in ["0", "1"]:  # 0=KOSPI, 1=KOSDAQ
             for page in range(1, 5):
-                url = f'https://finance.naver.com/sise/sise_market_sum.naver?sosok={market}&page={page}'
-                headers = {'User-Agent': 'Mozilla/5.0'}
+                url = f"https://finance.naver.com/sise/sise_market_sum.naver?sosok={market}&page={page}"
                 resp = req.get(url, headers=headers, timeout=15)
-                resp.encoding = 'euc-kr'
-                soup = BeautifulSoup(resp.text, 'html.parser')
-                rows = soup.select('table.type_2 tr')
-                for row in rows:
-                    tds = row.select('td')
+                resp.encoding = "euc-kr"
+                soup = BeautifulSoup(resp.text, "html.parser")
+                for row in soup.select("table.type_2 tr"):
+                    tds = row.select("td")
                     if len(tds) < 7:
                         continue
-                    a = tds[1].select_one('a')
+                    a = tds[1].select_one("a")
                     if not a:
                         continue
                     name = a.get_text(strip=True)
-                    href = a.get('href', '')
-                    code_match = re.search(r'code=(\d{6})(?!\w)', href)
-                    if not code_match:
+                    href = a.get("href", "")
+                    cm = re.search(r"code=(\d{6})(?!\w)", href)
+                    if not cm:
                         continue
-                    code = code_match.group(1)
-                    suffix = '.KQ' if market == '1' else '.KS'
-                    ticker = f'{code}{suffix}'
-                    mcap_text = tds[6].get_text(strip=True).replace(',', '')
+                    code = cm.group(1)
+                    suffix = ".KQ" if market == "1" else ".KS"
+                    ticker = code + suffix
+                    mcap_text = tds[6].get_text(strip=True).replace(",", "")
                     try:
-                        mcap = int(mcap_text)
+                        mcap_100m = int(mcap_text)  # 억원 단위
                     except ValueError:
                         continue
-                    if mcap >= 20000 and ticker not in existing:
-                        # ETF/ETN 제외
-                        etf_keywords = [
-                            "KODEX", "TIGER", "KBSTAR", "ARIRANG", "SOL",
-                            "HANARO", "ACE", "KOSEF", "TREX", "RISE", "PLUS",
-                            "ETN", "ETF", "인버스", "레버리지", "합성",
-                        ]
-                        if any(kw in name for kw in etf_keywords):
-                            continue
-                        candidates.append((name, ticker))
+                    if mcap_100m < 20000:
+                        continue
+                    if any(kw in name for kw in [
+                        "KODEX", "TIGER", "KBSTAR", "ARIRANG", "SOL", "HANARO",
+                        "ACE", "KOSEF", "TREX", "RISE", "PLUS",
+                        "ETN", "ETF", "인버스", "레버리지", "합성",
+                    ]):
+                        continue
+                    if ticker in existing:
+                        continue
+                    candidates.append(ticker)
+                    name_map[ticker] = name
     except Exception as e:
         print(f"    네이버 금융 크롤링 실패: {e}")
         return []
+    candidates = list(dict.fromkeys(candidates))
 
     print(f"    스캔 대상: {len(candidates)}개 종목")
     if not candidates:
         return []
 
-    # 1년 데이터 벌크 다운로드
-    ticker_list = [c[1] for c in candidates]
-    try:
-        data = yf.download(ticker_list, period="1y", progress=False)
-        close = data["Close"]
-    except Exception:
-        return []
+    sig = common_trend_signals(candidates)
+    long_only = {t: info for t, info in sig.items() if info.get("tag") == "long"}
+    print(f"    Long Sign 감지: {len(long_only)}개")
 
     featured = []
-    for name, ticker in candidates:
-        try:
-            col = close[ticker].dropna()
-            if len(col) < 200:
-                continue
+    for ticker, info in long_only.items():
+        name = name_map.get(ticker, ticker)
+        pct = info.get("chg", 0.0)
+        featured.append((name, f"{pct:+.2f}%", "Long Sign", "Long Sign"))
 
-            current = col.iloc[-1]
-            prev_close = col.iloc[-2]
-            pct = (current - prev_close) / prev_close * 100
-            high_52w = col.max()
-
-            notes = []
-
-            # 52주 신고가
-            if current >= high_52w:
-                notes.append("52주 신고가")
-
-            # 골든크로스
-            ma50 = col.rolling(50).mean()
-            ma200 = col.rolling(200).mean()
-            if len(ma50.dropna()) >= 2 and len(ma200.dropna()) >= 2:
-                prev_diff = ma50.iloc[-2] - ma200.iloc[-2]
-                curr_diff = ma50.iloc[-1] - ma200.iloc[-1]
-                if prev_diff <= 0 and curr_diff > 0:
-                    notes.append("골든크로스")
-
-            if not notes:
-                continue
-
-            featured.append((name, f"{pct:+.2f}%", " / ".join(notes), "Long Sign"))
-        except Exception:
-            continue
-
-    print(f"    특징주 {len(featured)}개 발견")
+    print(f"    특징주 {len(featured)}개")
     return featured
 
 
@@ -1324,6 +1307,21 @@ def get_kr_bond_3y():
 # ── 국장 시트 데이터 구성 ──
 def build_korea_sheet(target_date):
     print("국장 데이터 수집 중...")
+
+    # 시트가 source of truth — 기존 시트의 국장 탭에서 종목 리스트 읽기 시도
+    _sheet_kr_rows = []
+    try:
+        from sheet_tickers import load_tracking_tickers_from_sheet
+        _u, _n = load_tracking_tickers_from_sheet()
+        for _label, _tks in _u.items():
+            if _label.startswith("🇰🇷"):
+                _sec = _label.replace("🇰🇷", "").strip() or "기타"
+                for _t in _tks:
+                    _name = _n.get(_t, _t)
+                    _krx = f"KRX:{_t.replace('.KS', '').replace('.KQ', '')}"
+                    _sheet_kr_rows.append((_sec, _name, _t, _krx))
+    except Exception:
+        pass
 
     # 한국 종목 리스트 (종목명, 티커, KRX코드)
     kr_stocks_info = [
@@ -1434,6 +1432,9 @@ def build_korea_sheet(target_date):
         ("", "KT", "030200.KS", "KRX:030200"),
         ("", "LG유플러스", "032640.KS", "KRX:032640"),
     ]
+    if _sheet_kr_rows:
+        kr_stocks_info = _sheet_kr_rows
+        print(f"  시트에서 한국 추적 종목 {len(kr_stocks_info)}개 로드 (하드코딩 덮어씀)")
 
     # 한국 종목 일괄 다운로드 (5일 등락률 + 2년 특이사항/매매신호)
     print("  한국 종목 데이터 다운로드 중...")
@@ -1668,7 +1669,7 @@ def build_korea_sheet(target_date):
             name,
             chg,
             sign,
-            "",
+            ticker,  # col F: 티커 (대시보드가 source of truth로 읽어감)
             "",
             "",
             "",
@@ -1738,6 +1739,50 @@ def build_korea_sheet(target_date):
 
 
 # ── 메인 실행 ──
+PERF_SHEET_NAME = "스카우터_성과자료"
+PERF_HEADERS = ["날짜", "T-RISK", "FX-RISK", "C-RISK", "VIX점수", "매크로종합",
+                "VIX값", "DXY", "US10Y", "Oil평균", "S&P500 종가", "S&P500 일변동%"]
+PERF_KEYS = ["date", "t_risk", "fx_risk", "c_risk", "vix_score", "macro_total",
+             "vix", "dxy", "us_10y", "oil_avg", "sp500_close", "sp500_chg_pct"]
+
+
+def append_performance_log(perf):
+    """스카우터_성과자료 시트에 하루치 메트릭 누적 기록 (중복 날짜는 덮어쓰기)"""
+    try:
+        query = (f"name='{PERF_SHEET_NAME}' and '{FOLDER_ID}' in parents "
+                 "and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false")
+        results = drive.files().list(q=query, fields="files(id, name)").execute()
+        files = results.get("files", [])
+        if files:
+            sh = gc.open_by_key(files[0]["id"])
+        else:
+            print(f"  {PERF_SHEET_NAME} 시트 새로 생성")
+            sh = gc.create(PERF_SHEET_NAME, folder_id=FOLDER_ID)
+        ws = sh.sheet1
+        existing = ws.get_all_values()
+        # 헤더 확인·기록
+        if not existing or existing[0] != PERF_HEADERS:
+            if not existing:
+                ws.update(range_name="A1", values=[PERF_HEADERS])
+                existing = [PERF_HEADERS]
+            else:
+                ws.update(range_name="A1", values=[PERF_HEADERS])
+                existing[0] = PERF_HEADERS
+
+        row = [perf.get(k, "") for k in PERF_KEYS]
+        # 날짜 중복 확인
+        date_col = [r[0] for r in existing[1:]] if len(existing) > 1 else []
+        if perf["date"] in date_col:
+            idx = date_col.index(perf["date"]) + 2  # header + 1-based
+            ws.update(range_name=f"A{idx}", values=[row])
+            print(f"  {PERF_SHEET_NAME} 기록 갱신: {perf['date']} (행 {idx})")
+        else:
+            ws.append_row(row)
+            print(f"  {PERF_SHEET_NAME} 기록 추가: {perf['date']}")
+    except Exception as e:
+        print(f"  {PERF_SHEET_NAME} 기록 실패: {e}")
+
+
 def main():
     # 명령줄 인자 처리
     global_only = "--global-only" in sys.argv
@@ -1782,9 +1827,10 @@ def main():
     # 데이터 수집
     global_data = risk_cells = color_cells = None
     korea_data = kr_risk_cells = kr_color_cells = None
+    perf_metrics = None
 
     if not korea_only:
-        global_data, risk_cells, color_cells = build_global_sheet(yesterday)
+        global_data, risk_cells, color_cells, perf_metrics = build_global_sheet(yesterday)
     if not global_only:
         korea_data, kr_risk_cells, kr_color_cells = build_korea_sheet(today)
 
@@ -1872,6 +1918,11 @@ def main():
         if kr_fmt_list:
             ws_korea.batch_format(kr_fmt_list)
         print("  국장 시트 작성 완료")
+
+    # 성과 추적 시트에 하루치 매크로 메트릭 + S&P500 종가 누적
+    if perf_metrics:
+        print(f"\n성과 추적 기록 중...")
+        append_performance_log(perf_metrics)
 
     print(f"\n=== 완료! ===")
     print(f"파일명: {sheet_name}")
