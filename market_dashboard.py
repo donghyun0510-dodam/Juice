@@ -1011,6 +1011,40 @@ st.markdown(f"""
         border-bottom: 1px solid {CARD_BORDER}; padding-bottom: 8px;
         margin: 24px 0 16px 0;
     }}
+
+    /* 모바일 반응형 */
+    @media (max-width: 768px) {{
+        /* Streamlit 컬럼을 2열 그리드로 래핑 */
+        [data-testid="stHorizontalBlock"] {{
+            flex-wrap: wrap !important;
+            gap: 8px !important;
+        }}
+        [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {{
+            min-width: calc(50% - 8px) !important;
+            flex: 1 1 calc(50% - 8px) !important;
+        }}
+        /* 카드 컴팩트화 */
+        .idx-card {{ padding: 10px 6px; }}
+        .idx-card .idx-val {{ font-size: 20px; }}
+        .idx-card .idx-name {{ font-size: 10px; letter-spacing: 0.5px; }}
+        .section-title {{ font-size: 12px; margin: 16px 0 10px 0; letter-spacing: 1px; }}
+        .diagnosis-box, .strategy-box {{ padding: 12px 14px; font-size: 13px; }}
+        .header-bar h1 {{ font-size: 20px !important; }}
+        .header-bar .ts {{ font-size: 10px !important; }}
+        /* 본문 좌우 여백 축소 */
+        section.main > div.block-container {{ padding: 1rem 0.8rem !important; max-width: 100% !important; }}
+        /* 테이블 폰트 축소 */
+        .detail-table {{ font-size: 12px; }}
+        .detail-table th, .detail-table td {{ padding: 6px 4px !important; }}
+    }}
+
+    @media (max-width: 420px) {{
+        /* 초소형 화면: 대부분 1열 */
+        [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {{
+            min-width: 100% !important;
+            flex: 1 1 100% !important;
+        }}
+    }}
 </style>
 """, unsafe_allow_html=True)
 
