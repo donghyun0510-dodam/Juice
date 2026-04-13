@@ -294,6 +294,7 @@ def compute_t_risk(bond_2y, bond_10y, bond_30y):
     score_30y = assess_risk("30Y", bond_30y)[1]
 
     spread_score = 0
+    spread = None
     if bond_10y is not None and bond_2y is not None:
         spread = bond_10y - bond_2y
         try:
