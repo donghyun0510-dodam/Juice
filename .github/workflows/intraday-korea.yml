@@ -32,7 +32,10 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add signal_snapshot.json long_sign_seen.json 2>/dev/null || true
-          if ! git diff --cached --quiet; then
-            git commit -m "chore: intraday-korea state update [skip ci]"
-            git push
-          fi
+          if git diff --cached --quiet; then echo "no changes"; exit 0; fi
+          git commit -m "chore: intraday-korea state update [skip ci]"
+          for i in 1 2 3 4 5; do
+            git pull --rebase origin main && git push origin main && exit 0
+            echo "push attempt $i failed, retrying…"; sleep 5
+          done
+          exit 1
