@@ -1573,116 +1573,13 @@ cover_hits = [(t, info) for t, info in sig.items() if info["tag"] == "cover"]
 hold_long = [(t, info) for t, info in sig.items() if info["tag"] == "hold_long"]
 hold_sell = [(t, info) for t, info in sig.items() if info["tag"] == "hold_sell"]
 
-SIGN_CRITERIA = {
-    "long": """
-**📈 Long Sign 판정 기준** (중요도 1 > 2 > 3 순)
-
-**#1 신고가 돌파** (단독 인정, 최강 필터)
-- 금일 종가 ≥ 52주 최고가 × 1.001
-
-**#2 정배열 가속** (게이트·모멘텀 충족 시)
-- 20일선 > 60일선 > 120일선 (정배열)
-- 20일선 기울기 상승 (5거래일 전 대비 현재값 높음)
-
-**#3 직전 고점 돌파** (게이트·모멘텀 충족 시)
-- 종가 > 직전 20거래일 박스권 고점 × 1.01 (1% 이상 돌파)
-
-**게이트 & 모멘텀** (#2·#3에 적용):
-- **게이트**: 52주 신고가와 괴리 **3% 이내**
-- **모멘텀**: 5일 종가 변화 **≥ +5%** AND 10일 종가 변화 **≥ +10%**
-
-**의미**: 강한 상승 신호 — 40/30/30 분할 매수 후보
-
-**제외 예시** (52주 근처지만 모멘텀 약함):
-- 한화에어로 (5일 +4% < 5%), GS/엔씨소프트 (10일 < 10%) → hold_long 또는 neutral
-""",
-    "sell": """
-**📉 Sell Sign 판정 기준** (상승 추세 종료 변곡점, 고점권에서 꺾임)
-
-**기준**: 직전 상승 기울기와 최근 하락 기울기 비교 + 고점권 게이트
-
-- **직전 구간** (30일 전 ~ 5일 전): 일평균 상승률 계산
-- **최근 구간** (최근 5거래일): 일평균 하락률 계산
-- **판정**:
-  1. 직전 구간 기울기 > 0 (상승 추세였음)
-  2. 최근 구간 기울기 < 0 (하락 중)
-  3. 하락 기울기 절대값 > 직전 상승 기울기 (더 가파른 하락)
-  4. **직전 구간의 고점이 52주 신고가의 95% 이상** (고점권에서 꺾였어야 함)
-
-**의미**: 상승 추세의 변곡점 — 40/30/30 분할 매도 후보
-
-**Short sign과 차이**: Sell은 "고점에서의 꺾임"(top reversal), Short는 "이미 하락 중 악화"(downtrend acceleration)
-""",
-    "short": """
-**🔻 Short Sign 판정 기준** (하락 추세 형성/강화 변곡점)
-
-**두 가지 모드 중 하나 충족**:
-
-**① 강화 (acceleration)** — 이미 하락 중이 더 깊어짐
-- 금일 종가가 **52주 신저가 경신**
-
-**② 형성 (formation)** — 상승 추세가 아닌 상태에서 가파른 하락
-- 직전 구간(30~5일 전) 기울기 ≤ 0 (**상승 추세가 아님**, 횡보 또는 하락)
-- 최근 5일 하락 기울기 절대값 > 직전 25일 기울기 절대값
-
-**의미**: 주식 투자 최악의 시그널 — 신규 매수 전면 중단
-
-**Sell sign과 차이**: Sell은 "상승 추세 중 고점에서 꺾임", Short는 "상승 추세가 아닌 상태에서 추가 붕괴 또는 신저가"
-""",
-    "cover": """
-**🔺 Short Cover 판정 기준** (장기 하락 추세의 종료 변곡점)
-
-**기본 조건** (변곡점):
-- **직전 구간** (30~5일 전): 기울기 < 0 (하락 중)
-- **최근 구간** (최근 5거래일): 기울기 > 0 (상승)
-- 최근 상승 기울기 절대값 > 직전 하락 기울기 절대값
-
-**장기 하락 게이트** (모두 충족):
-- 종가 **< 200일 이동평균** (장기 추세선 아래)
-- 52주 신고가 대비 **-15% 이상 하락** (의미 있는 장기 조정)
-- **저점 패턴** (둘 중 하나 충족):
-  - (a) 최근 15일 저점 > 직전 15일 저점 (Higher Low 성립)
-  - (b) 최근 15일 저점 대비 현재가 **+10% 이상 반등** (저점 형성 후 강한 튀어오름)
-
-**의미**: 장기 하락 추세가 반전되어 비추세(횡보)로 전환되는 변곡점
-
-**Long sign과 차이**: Long은 52주 신고가 5% 이내에서의 돌파. Short cover는 52주 신고가와 한참 괴리된 장기 하락권에서의 급등 반등.
-
-**예시**: AMZN 4/8~9 급등, META 4/8 갭상승, NFLX 2/27 갭상승
-
-**제외 예시** (장기 상승 추세이므로 Short cover 아님):
-- AVGO, MU, GOOG, JPM, BAC, DE — 200MA 위 + 52w high 근처 → hold_long
-""",
-    "hold_long": """
-**✅ 추세 유지 (Long hold) 판정 기준**
-
-- 금일 종가 > 50일 이동평균 > 200일 이동평균 (**정배열**)
-- 단, Long·Sell·Short·Cover 어느 신호도 신규 발생하지 않음
-
-**의미**: 상승 추세 지속 중 — 기존 포지션 보유, 신규 매수 없음
-""",
-    "hold_sell": """
-**⛔ 하락 추세 지속 판정 기준**
-
-- 금일 종가 < 50일 이동평균 < 200일 이동평균 (**역배열**)
-- 단, Long·Sell·Short·Cover 어느 신호도 신규 발생하지 않음
-
-**의미**: 하락 추세 지속 — 신규 매수 보류, Long sign 재확립까지 관망
-""",
-}
-
 def _sign_section(key, title, hits, caption, expanded=False):
-    c1, c2 = st.columns([20, 1])
-    with c2:
-        with st.popover("❓", use_container_width=True):
-            st.markdown(SIGN_CRITERIA[key])
-    with c1:
-        with st.expander(f"{title} ({len(hits)}개)", expanded=expanded):
-            if hits:
-                st.markdown("".join(_fmt_row(t, i) for t, i in hits), unsafe_allow_html=True)
-                st.caption(caption)
-            else:
-                st.markdown("_해당 종목 없음_")
+    with st.expander(f"{title} ({len(hits)}개)", expanded=expanded):
+        if hits:
+            st.markdown("".join(_fmt_row(t, i) for t, i in hits), unsafe_allow_html=True)
+            st.caption(caption)
+        else:
+            st.markdown("_해당 종목 없음_")
 
 _sign_section("long", "📈 Long Sign — 진입·분할매수 후보", long_hits,
               "200MA 상향돌파 또는 20일 신고가 + 정배열 — 40/30/30 분할 매수 후보", expanded=False)
@@ -1980,14 +1877,7 @@ else:
         sec = sector_map.get(t, "Others")
         by_sector.setdefault(sec, []).append((t, info))
 
-    c1, c2 = st.columns([20, 1])
-    with c2:
-        with st.popover("❓", use_container_width=True):
-            st.markdown(SIGN_CRITERIA["long"])
-            st.markdown("---")
-            st.markdown(f"**스캔 대상**: S&P 500 (추적 종목 제외, 시총 {mcap_label})\n\n**갱신 주기**: 6시간")
-    with c1:
-        with st.expander(f"🇺🇸 S&P 500 신규 Long Sign ({len(us_longs_filtered)}개 / 전체 {len(us_longs)}개)", expanded=False):
+    with st.expander(f"🇺🇸 S&P 500 신규 Long Sign ({len(us_longs_filtered)}개 / 전체 {len(us_longs)}개)", expanded=False):
             if us_longs_filtered:
                 for sec in sorted(by_sector.keys()):
                     hits = sorted(by_sector[sec], key=lambda x: -x[1].get("mcap", 0))
@@ -2016,14 +1906,7 @@ else:
 if kr_err:
     st.warning(f"KOSPI 200 스캔 실패: {kr_err}")
 else:
-    c1, c2 = st.columns([20, 1])
-    with c2:
-        with st.popover("❓", use_container_width=True):
-            st.markdown(SIGN_CRITERIA["long"])
-            st.markdown("---")
-            st.markdown("**스캔 대상**: KOSPI + KOSDAQ (추적 종목 제외, 시총 2조원+, ETF/ETN 제외)\n\n**데이터 소스**: 네이버 금융\n\n**갱신 주기**: 1시간")
-    with c1:
-        with st.expander(f"🇰🇷 한국 신규 Long Sign ({len(kr_longs)}개)", expanded=False):
+    with st.expander(f"🇰🇷 한국 신규 Long Sign ({len(kr_longs)}개)", expanded=False):
             if kr_longs:
                 sorted_hits = sorted(kr_longs.items(), key=lambda x: -x[1]["chg"])
                 st.markdown("".join(_fmt_row(t, i) for t, i in sorted_hits), unsafe_allow_html=True)
