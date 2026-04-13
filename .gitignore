@@ -5,6 +5,22 @@ credentials.json
 
 # ── 런타임 생성 상태 파일 ──
 signal_snapshot.json
+macro_snapshot.json
+long_sign_seen.json
+kr_promotion_tracker.json
+
+# ── 환경변수 ──
+.env
+.env.local
+
+# ── 유틸리티/디버그 스크립트 (하드코딩 포함, 로컬 전용) ──
+read_template.py
+check_folder.py
+find_folder.py
+cleanup.py
+check_semis.py
+check_recovery.py
+semis_out.txt
 
 # ── 로그 ──
 log_*.txt

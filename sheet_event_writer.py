@@ -26,7 +26,7 @@ SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",
 ]
-FOLDER_ID = "1oCzJUMAklZwXqBR67CmvzmFdZGg3wLuv"
+FOLDER_ID = os.environ.get("GSHEET_FOLDER_ID", "1oCzJUMAklZwXqBR67CmvzmFdZGg3wLuv")
 
 EVENT_COL = "H"  # 장중 이벤트 컬럼
 

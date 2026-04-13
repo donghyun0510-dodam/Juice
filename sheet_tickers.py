@@ -11,7 +11,7 @@ import gspread
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TOKEN_FILE = os.path.join(BASE_DIR, "token.pickle")
-FOLDER_ID = "1oCzJUMAklZwXqBR67CmvzmFdZGg3wLuv"
+FOLDER_ID = os.environ.get("GSHEET_FOLDER_ID", "1oCzJUMAklZwXqBR67CmvzmFdZGg3wLuv")
 
 
 def _get_creds():

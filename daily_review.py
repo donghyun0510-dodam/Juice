@@ -5,7 +5,7 @@
 - 뉴스/코멘트 등 수동 항목은 빈칸으로 남김
 """
 
-import sys, io
+import os, sys, io
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
 import gspread
@@ -26,7 +26,7 @@ import pickle
 # ── 설정 ──
 CLIENT_SECRET_FILE = "client_secret.json"
 TOKEN_FILE = "token.pickle"
-FOLDER_ID = "1oCzJUMAklZwXqBR67CmvzmFdZGg3wLuv"
+FOLDER_ID = os.environ.get("GSHEET_FOLDER_ID", "1oCzJUMAklZwXqBR67CmvzmFdZGg3wLuv")
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
