@@ -903,6 +903,23 @@ st.markdown(f"""
         opacity: 0.55; cursor: help; font-size: 11px; font-weight: normal;
     }}
     .idx-card .idx-info:hover {{ opacity: 1; color: #4da6ff; }}
+
+    /* 클릭/탭 가능 툴팁 (모바일 대응) */
+    .tt {{
+        display: inline-block; position: relative; cursor: pointer;
+        margin-left: 4px; opacity: 0.55; font-size: 11px; color: {TEXT_SECONDARY};
+        outline: none;
+    }}
+    .tt:hover, .tt:focus {{ opacity: 1; color: #4da6ff; }}
+    .tt-box {{
+        display: none; position: absolute; z-index: 100;
+        top: 100%; left: 50%; transform: translateX(-50%); margin-top: 6px;
+        background: #1a1a1a; color: #e0e0e0; border: 1px solid {CARD_BORDER};
+        border-radius: 6px; padding: 8px 12px; font-size: 11px; font-weight: normal;
+        white-space: nowrap; line-height: 1.5; text-align: left;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    }}
+    .tt:hover .tt-box, .tt:focus .tt-box, .tt:active .tt-box {{ display: block; }}
     .idx-card .idx-val {{ font-size: 28px; font-weight: 700; margin: 6px 0 0 0; font-family: 'Consolas', monospace; }}
 
     /* 진단 박스 */
@@ -1259,11 +1276,11 @@ for col, (name, chg_str, chg_val, src) in zip(idx_cols, indices):
             else: ic = COLOR_CRISIS
             arrow = "▲" if chg_val >= 0 else "▼"
             tkr, desc, source = src
-            tooltip = f"티커: {tkr}&#10;출처: {source}&#10;{desc}"
+            tooltip_text = f"티커: {tkr}<br>출처: {source}<br>{desc}"
             st.markdown(
                 f"""<div class="idx-card" style="border-color:{ic}40;">
                     <div style="position:absolute;top:0;left:0;right:0;height:2px;background:{ic};"></div>
-                    <p class="idx-name">{name} <span class="idx-info" title="{tooltip}">ⓘ</span></p>
+                    <p class="idx-name">{name} <span class="tt" tabindex="0">ⓘ<span class="tt-box">{tooltip_text}</span></span></p>
                     <p class="idx-val" style="color:{ic};">{arrow} {chg_str}</p>
                 </div>""",
                 unsafe_allow_html=True,
