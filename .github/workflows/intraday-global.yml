@@ -16,6 +16,7 @@ jobs:
   run:
     runs-on: ubuntu-latest
     env:
+      TZ: Asia/Seoul
       GOOGLE_SA_JSON: ${{ secrets.GOOGLE_SA_JSON }}
       GSHEET_FOLDER_ID: ${{ secrets.GSHEET_FOLDER_ID }}
       RULES_DEPLOY_KEY: ${{ secrets.RULES_DEPLOY_KEY }}
