@@ -1073,7 +1073,7 @@ def detail_table(rows):
 st.markdown(
     f"""<div class="header-bar">
         <h1>주식 스카우터</h1>
-        <span class="ts">{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} KST &nbsp;|&nbsp; {"🟢 10분 자동 갱신" if MARKET_OPEN else "⏸ 휴장 중 (수동 새로고침)"} &nbsp;|&nbsp; Yahoo Finance &middot; Investing.com</span>
+        <span class="ts">{_kst_now().strftime('%Y-%m-%d %H:%M:%S')} KST &nbsp;|&nbsp; {"🟢 10분 자동 갱신" if MARKET_OPEN else "⏸ 휴장 중 (수동 새로고침)"} &nbsp;|&nbsp; Yahoo Finance &middot; Investing.com</span>
     </div>""",
     unsafe_allow_html=True,
 )
