@@ -1,0 +1,10 @@
+gspread>=6.0
+google-auth>=2.20
+google-auth-oauthlib>=1.0
+google-api-python-client>=2.100
+yfinance>=0.2.40
+pandas>=2.0
+numpy>=1.24
+requests>=2.31
+beautifulsoup4>=4.12
+streamlit>=1.30

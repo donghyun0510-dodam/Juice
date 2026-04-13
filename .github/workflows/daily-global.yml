@@ -1,0 +1,36 @@
+name: Daily Review - Global
+on:
+  schedule:
+    - cron: "0 20 * * 1-5"   # 05:00 KST (전일 20:00 UTC) · 월~금
+  workflow_dispatch:
+
+concurrency:
+  group: sheet-writer
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    env:
+      GOOGLE_SA_JSON: ${{ secrets.GOOGLE_SA_JSON }}
+      GSHEET_FOLDER_ID: ${{ secrets.GSHEET_FOLDER_ID }}
+      RULES_DEPLOY_KEY: ${{ secrets.RULES_DEPLOY_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+
+      - name: Run daily review (global)
+        run: python daily_review.py --global-only
+
+      - name: Commit-back state files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add signal_snapshot.json macro_snapshot.json long_sign_seen.json kr_promotion_tracker.json 2>/dev/null || true
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: daily-global state update [skip ci]"
+            git push
+          fi

@@ -68,7 +68,7 @@ def is_us_cash_open():
     return False
 
 MARKET_OPEN = is_market_open()
-US_CASH_OPEN = is_us_cash_open()
+US_CASH_OPEN = is_us_cash_open()  # 모듈 로드 시 초기값 — collect_all_data() 호출 시마다 재평가됨
 if MARKET_OPEN:
     st.markdown('<meta http-equiv="refresh" content="600">', unsafe_allow_html=True)
 
@@ -497,8 +497,10 @@ def _compute_yesterday_baseline():
         return {}
 
 
-@st.cache_data(ttl=900)
+@st.cache_data(ttl=120)
 def collect_all_data():
+    global US_CASH_OPEN
+    US_CASH_OPEN = is_us_cash_open()
     data = {}
 
     # 금리
@@ -1499,12 +1501,12 @@ def _record_sheet_events(changes_key: str, changes: dict, market: str):
     except Exception as e:
         return 0
 
-if MARKET_OPEN and SIGNAL_CHANGES:
-    # 현재 시장에 따라 기록 (KST 기준 한국장/미국장 판단)
+# 시트 H열 기록은 GitHub Actions intraday_scan.py에서만 수행 (이중 기록 방지)
+# 대시보드는 읽기/표시 전용
+if False and MARKET_OPEN and SIGNAL_CHANGES:
     from datetime import time as _dtime
     now_t = datetime.now().time()
     target_market = "korea" if _dtime(9, 0) <= now_t <= _dtime(15, 30) else "global"
-    # 변화 스냅샷을 키로 (같은 변화 조합이면 재호출 안 됨)
     _changes_key = "|".join(sorted(f"{t}:{b}>{a}" for t, (b, a) in SIGNAL_CHANGES.items()))
     _record_sheet_events(_changes_key, SIGNAL_CHANGES, target_market)
 

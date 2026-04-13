@@ -1,0 +1,36 @@
+name: Daily Review - Korea
+on:
+  schedule:
+    - cron: "0 7 * * 1-5"   # 16:00 KST (07:00 UTC) · 월~금
+  workflow_dispatch:
+
+concurrency:
+  group: sheet-writer
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    env:
+      GOOGLE_SA_JSON: ${{ secrets.GOOGLE_SA_JSON }}
+      GSHEET_FOLDER_ID: ${{ secrets.GSHEET_FOLDER_ID }}
+      RULES_DEPLOY_KEY: ${{ secrets.RULES_DEPLOY_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+
+      - name: Run daily review (korea)
+        run: python daily_review.py --korea-only
+
+      - name: Commit-back state files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add signal_snapshot.json macro_snapshot.json long_sign_seen.json kr_promotion_tracker.json 2>/dev/null || true
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: daily-korea state update [skip ci]"
+            git push
+          fi

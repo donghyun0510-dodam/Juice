@@ -9,9 +9,6 @@ import os, sys, io
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
 import gspread
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 import yfinance as yf
 import requests as req
@@ -20,34 +17,9 @@ from bs4 import BeautifulSoup
 import re
 from datetime import datetime, timedelta
 import time
-import os
-import pickle
+from sheet_auth import get_credentials
 
-# ── 설정 ──
-CLIENT_SECRET_FILE = "client_secret.json"
-TOKEN_FILE = "token.pickle"
 FOLDER_ID = os.environ.get("GSHEET_FOLDER_ID", "1oCzJUMAklZwXqBR67CmvzmFdZGg3wLuv")
-
-SCOPES = [
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive",
-]
-
-# ── OAuth2 인증 ──
-def get_credentials():
-    creds = None
-    if os.path.exists(TOKEN_FILE):
-        with open(TOKEN_FILE, "rb") as f:
-            creds = pickle.load(f)
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            flow = InstalledAppFlow.from_client_secrets_file(CLIENT_SECRET_FILE, SCOPES)
-            creds = flow.run_local_server(port=0)
-        with open(TOKEN_FILE, "wb") as f:
-            pickle.dump(creds, f)
-    return creds
 
 creds = get_credentials()
 gc = gspread.authorize(creds)

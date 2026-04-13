@@ -2,37 +2,21 @@
 증시 리뷰 스프레드시트에서 추적 종목 리스트 읽기 (source of truth).
 """
 import os
-import pickle
 import re
 
-from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 import gspread
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-TOKEN_FILE = os.path.join(BASE_DIR, "token.pickle")
+from sheet_auth import get_credentials
+
 FOLDER_ID = os.environ.get("GSHEET_FOLDER_ID", "1oCzJUMAklZwXqBR67CmvzmFdZGg3wLuv")
 
 
 def _get_creds():
-    if not os.path.exists(TOKEN_FILE):
-        return None
     try:
-        with open(TOKEN_FILE, "rb") as f:
-            creds = pickle.load(f)
+        return get_credentials()
     except Exception:
         return None
-    if creds and creds.valid:
-        return creds
-    if creds and creds.expired and creds.refresh_token:
-        try:
-            creds.refresh(Request())
-            with open(TOKEN_FILE, "wb") as f:
-                pickle.dump(creds, f)
-            return creds
-        except Exception:
-            return None
-    return None
 
 
 def _find_latest_review_sheet(drive):

@@ -13,41 +13,17 @@ daily_review.py와 OAuth2 토큰 공유 (token.pickle).
 """
 
 import os
-import pickle
 from datetime import datetime
 import gspread
-from google.auth.transport.requests import Request
-from google_auth_oauthlib.flow import InstalledAppFlow
+from sheet_auth import get_credentials
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-TOKEN_PATH = os.path.join(SCRIPT_DIR, "token.pickle")
-CLIENT_SECRET_PATH = os.path.join(SCRIPT_DIR, "client_secret.json")
-SCOPES = [
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive",
-]
 FOLDER_ID = os.environ.get("GSHEET_FOLDER_ID", "1oCzJUMAklZwXqBR67CmvzmFdZGg3wLuv")
 
 EVENT_COL = "H"  # 장중 이벤트 컬럼
 
 
 def _get_client():
-    """OAuth2 토큰 재사용하여 gspread 클라이언트 반환."""
-    creds = None
-    if os.path.exists(TOKEN_PATH):
-        with open(TOKEN_PATH, "rb") as f:
-            creds = pickle.load(f)
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            if not os.path.exists(CLIENT_SECRET_PATH):
-                raise FileNotFoundError("client_secret.json 없음")
-            flow = InstalledAppFlow.from_client_secrets_file(CLIENT_SECRET_PATH, SCOPES)
-            creds = flow.run_local_server(port=0)
-        with open(TOKEN_PATH, "wb") as f:
-            pickle.dump(creds, f)
-    return gspread.authorize(creds)
+    return gspread.authorize(get_credentials())
 
 
 def _find_today_sheet(gc, market: str):

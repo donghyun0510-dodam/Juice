@@ -1,0 +1,117 @@
+{
+  "009150.KS": {
+    "first_long_date": "2026-04-13",
+    "trigger_close": 571000.0,
+    "name": "삼성전기"
+  },
+  "298040.KS": {
+    "first_long_date": "2026-04-13",
+    "trigger_close": 2994000.0,
+    "name": "효성중공업"
+  },
+  "010120.KS": {
+    "first_long_date": "2026-04-13",
+    "trigger_close": 181600.0,
+    "name": "LS ELECTRIC"
+  },
+  "000150.KS": {
+    "first_long_date": "2026-04-13",
+    "trigger_close": 1277000.0,
+    "name": "두산"
+  },
+  "079550.KS": {
+    "first_long_date": "2026-04-13",
+    "trigger_close": 944000.0,
+    "name": "LIG넥스원"
+  },
+  "017670.KS": {
+    "first_long_date": "2026-04-13",
+    "trigger_close": 93700.0,
+    "name": "SK텔레콤"
+  },
+  "278470.KS": {
+    "first_long_date": "2026-04-13",
+    "trigger_close": 399500.0,
+    "name": "에이피알"
+  },
+  "032640.KS": {
+    "first_long_date": "2026-04-13",
+    "trigger_close": 17280.0,
+    "name": "LG유플러스"
+  },
+  "078930.KS": {
+    "first_long_date": "2026-04-13",
+    "trigger_close": 72900.0,
+    "name": "GS"
+  },
+  "241560.KS": {
+    "first_long_date": "2026-04-13",
+    "trigger_close": 69400.0,
+    "name": "두산밥캣"
+  },
+  "062040.KS": {
+    "first_long_date": "2026-04-13",
+    "trigger_close": 169400.0,
+    "name": "산일전기"
+  },
+  "012450.KS": {
+    "first_long_date": "2026-04-13",
+    "trigger_close": 1528000.0,
+    "name": "한화에어로스페이스"
+  },
+  "006260.KS": {
+    "first_long_date": "2026-04-13",
+    "trigger_close": 296000.0,
+    "name": "LS"
+  },
+  "047040.KS": {
+    "first_long_date": "2026-04-13",
+    "trigger_close": 23750.0,
+    "name": "대우건설"
+  },
+  "066970.KS": {
+    "first_long_date": "2026-04-13",
+    "trigger_close": 181400.0,
+    "name": "엘앤에프"
+  },
+  "267270.KS": {
+    "first_long_date": "2026-04-13",
+    "trigger_close": 163100.0,
+    "name": "HD건설기계"
+  },
+  "375500.KS": {
+    "first_long_date": "2026-04-13",
+    "trigger_close": 94500.0,
+    "name": "DL이앤씨"
+  },
+  "017960.KS": {
+    "first_long_date": "2026-04-13",
+    "trigger_close": 50700.0,
+    "name": "한국카본"
+  },
+  "120110.KS": {
+    "first_long_date": "2026-04-13",
+    "trigger_close": 87900.0,
+    "name": "코오롱인더"
+  },
+  "039030.KQ": {
+    "first_long_date": "2026-04-13",
+    "trigger_close": 490000.0,
+    "name": "이오테크닉스"
+  },
+  "010170.KQ": {
+    "first_long_date": "2026-04-13",
+    "trigger_close": 19870.0,
+    "name": "대한광통신"
+  },
+  "218410.KQ": {
+    "first_long_date": "2026-04-13",
+    "trigger_close": 93800.0,
+    "name": "RFHIC"
+  },
+  "222800.KQ": {
+    "first_long_date": "2026-04-13",
+    "trigger_close": 66400.0,
+    "name": "심텍"
+  }
+}

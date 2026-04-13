@@ -1,0 +1,30 @@
+name: Setup runtime
+description: Checkout code, pull private rules repo, install deps, inject SA credentials
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+        cache: pip
+
+    - name: Install Python deps
+      shell: bash
+      run: pip install -r requirements.txt
+
+    - name: Setup SSH for rules repo
+      uses: webfactory/ssh-agent@v0.9.0
+      with:
+        ssh-private-key: ${{ env.RULES_DEPLOY_KEY }}
+
+    - name: Clone rules repo and merge into .claude/agents/
+      shell: bash
+      run: |
+        git clone --depth 1 git@github.com:donghyun0510-dodam/trendfollow-rules-DH.git /tmp/rules
+        mkdir -p .claude/agents
+        cp /tmp/rules/.claude/agents/signal-judge.md .claude/agents/signal-judge.md
+
+    - name: Write SA credentials
+      shell: bash
+      run: |
+        printf '%s' "$GOOGLE_SA_JSON" > sa_credentials.json

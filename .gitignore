@@ -3,11 +3,8 @@ client_secret.json
 token.pickle
 credentials.json
 
-# ── 런타임 생성 상태 파일 ──
-signal_snapshot.json
-macro_snapshot.json
-long_sign_seen.json
-kr_promotion_tracker.json
+# ── 런타임 상태 파일 (Actions commit-back으로 동기화) ──
+# 의도적으로 tracked — .gitignore에 없어야 commit-back 가능
 
 # ── 환경변수 ──
 .env
@@ -45,3 +42,5 @@ Thumbs.db
 task_global.xml
 task_global_utf16.xml
 .claude/agents/signal-judge.md
+sa_credentials.json
+trendfollow-scouter-*.json
