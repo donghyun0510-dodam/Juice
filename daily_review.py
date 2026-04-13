@@ -337,7 +337,8 @@ def compute_c_risk_index(wti_val, brent_val, gold_val, copper_val,
     gc_ratio = None
     if gold_val is not None and copper_val is not None and copper_val > 0:
         gc_ratio = gold_val / copper_val
-        gc_score = max(0, min(25, (gc_ratio - 0.35) / 0.20 * 20))
+        # 300→0, 700→25 선형 (Gold $/oz ÷ Copper $/lb)
+        gc_score = max(0, min(25, (gc_ratio - 300) / 400 * 25))
 
     # 단기 모멘텀
     momentum = 0

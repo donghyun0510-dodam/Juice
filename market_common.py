@@ -96,9 +96,10 @@ def compute_c_risk(wti, brent, gold, copper):
     gc_ratio = None
     if gold is not None and copper is not None and copper > 0:
         gc_ratio = gold / copper
-        if gc_ratio < 0.35: gc_score = 0
-        elif gc_ratio <= 0.45: gc_score = 10
-        elif gc_ratio <= 0.55: gc_score = 20
+        # Gold($/oz) ÷ Copper($/lb): 역사적 300~800 범위
+        if gc_ratio < 300: gc_score = 0
+        elif gc_ratio <= 500: gc_score = 10
+        elif gc_ratio <= 700: gc_score = 20
         else: gc_score = 30
 
     return min(oil_score * 2 + gc_score * 1.33, 100), oil_avg, gc_ratio
