@@ -12,6 +12,23 @@ try:
     from curl_cffi import requests as cffi_req
 except Exception:
     cffi_req = None
+
+_CFFI_SESSION = None
+_CFFI_WARMED = False
+
+def _get_cffi_session():
+    global _CFFI_SESSION, _CFFI_WARMED
+    if cffi_req is None:
+        return None
+    if _CFFI_SESSION is None:
+        _CFFI_SESSION = cffi_req.Session(impersonate="chrome")
+    if not _CFFI_WARMED:
+        try:
+            _CFFI_SESSION.get("https://kr.investing.com/", timeout=15)
+            _CFFI_WARMED = True
+        except Exception:
+            pass
+    return _CFFI_SESSION
 import json
 import os
 from datetime import datetime, timedelta
@@ -140,9 +157,12 @@ def _scrape_investing(url):
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             "Accept-Language": "ko-KR,ko;q=0.9",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Referer": "https://kr.investing.com/",
         }
-        if cffi_req is not None:
-            resp = cffi_req.get(url, headers=headers, timeout=15, impersonate="chrome")
+        sess = _get_cffi_session()
+        if sess is not None:
+            resp = sess.get(url, headers=headers, timeout=15)
         else:
             resp = req.get(url, headers=headers, timeout=15)
         text = resp.text
