@@ -13,21 +13,24 @@ try:
 except Exception:
     cffi_req = None
 
+import threading
 _CFFI_SESSION = None
 _CFFI_WARMED = False
+_CFFI_LOCK = threading.Lock()
 
 def _get_cffi_session():
     global _CFFI_SESSION, _CFFI_WARMED
     if cffi_req is None:
         return None
-    if _CFFI_SESSION is None:
-        _CFFI_SESSION = cffi_req.Session(impersonate="chrome")
-    if not _CFFI_WARMED:
-        try:
-            _CFFI_SESSION.get("https://kr.investing.com/", timeout=15)
-            _CFFI_WARMED = True
-        except Exception:
-            pass
+    with _CFFI_LOCK:
+        if _CFFI_SESSION is None:
+            _CFFI_SESSION = cffi_req.Session(impersonate="chrome")
+        if not _CFFI_WARMED:
+            try:
+                _CFFI_SESSION.get("https://kr.investing.com/", timeout=15)
+                _CFFI_WARMED = True
+            except Exception:
+                pass
     return _CFFI_SESSION
 import json
 import os
@@ -161,10 +164,17 @@ def _scrape_investing(url):
             "Referer": "https://kr.investing.com/",
         }
         sess = _get_cffi_session()
-        if sess is not None:
-            resp = sess.get(url, headers=headers, timeout=15)
-        else:
-            resp = req.get(url, headers=headers, timeout=15)
+        def _do():
+            if sess is not None:
+                return sess.get(url, headers=headers, timeout=15)
+            return req.get(url, headers=headers, timeout=15)
+        resp = _do()
+        # 403 (Cloudflare burst) → short backoff & retry up to 2 times
+        for i in range(2):
+            if resp.status_code != 403:
+                break
+            time.sleep(0.8 + i * 0.7)
+            resp = _do()
         text = resp.text
         price_match = re.search(r'data-test="instrument-price-last"[^>]*>([^<]+)', text)
         change_match = re.search(r'data-test="instrument-price-change-percent"[^>]*>([^<]+)', text)
