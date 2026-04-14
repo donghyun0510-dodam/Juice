@@ -721,7 +721,7 @@ def collect_all_data():
     _, data["nq_chg_str"], _, data["nq_chg"] = scrape_yahoo_quote(
         "https://finance.yahoo.com/quote/MNQ=F/", symbol="MNQ=F"
     )
-    data["kospi_night_chg_str"], data["kospi_night_chg"] = get_change_pct("KM=F")  # CME KOSPI 야간선물
+    data["kospi_night_chg_str"], data["kospi_night_chg"] = get_change_pct("EWY")  # iShares MSCI Korea ETF (미국 시간대 한국 익스포저 대리)
 
     # 종합 점수 계산
     t_raw, data["t_risk"], data["spread"] = compute_t_risk(data["2y"], data["10y"], data["30y"])
@@ -1403,7 +1403,7 @@ indices = [
     (f"S&P 500{_fut_sfx}",      d["sp500_chg_str"],   d["sp500_chg"],   _idx_src["sp500"]),
     (f"RUSSELL 2000{_fut_sfx}", d["russell_chg_str"], d["russell_chg"], _idx_src["russell"]),
     ("MICRO NASDAQ",            d["nq_chg_str"],      d["nq_chg"],      ("MNQ=F", "Micro E-mini NASDAQ-100 선물 (CME)", "Yahoo Finance 페이지")),
-    ("KOSPI 야간선물",           d["kospi_night_chg_str"], d["kospi_night_chg"], ("KM=F", "CME KOSPI 야간 선물", "yfinance")),
+    ("EWY (한국 ETF)",           d["kospi_night_chg_str"], d["kospi_night_chg"], ("EWY", "iShares MSCI South Korea ETF (미국 상장, KOSPI 대리변수)", "yfinance")),
 ]
 idx_cols = st.columns(len(indices)) if indices else []
 for col, (name, chg_str, chg_val, src) in zip(idx_cols, indices):
