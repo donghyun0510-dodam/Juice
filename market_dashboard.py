@@ -1405,10 +1405,21 @@ indices = [
     ("MICRO NASDAQ",            d["nq_chg_str"],      d["nq_chg"],      ("MNQ=F", "Micro E-mini NASDAQ-100 선물 (CME)", "Yahoo Finance 페이지")),
     ("KOSPI 야간선물",           d["kospi_night_chg_str"], d["kospi_night_chg"], ("KM=F", "CME KOSPI 야간 선물", "yfinance")),
 ]
-indices = [x for x in indices if x[2] is not None]
 idx_cols = st.columns(len(indices)) if indices else []
 for col, (name, chg_str, chg_val, src) in zip(idx_cols, indices):
     with col:
+        if chg_val is None:
+            tkr, desc, source = src
+            tooltip_text = f"티커: {tkr}<br>출처: {source}<br>{desc}<br>(데이터 미수신)"
+            st.markdown(
+                f"""<div class="idx-card" style="border-color:#88888840;">
+                    <div style="position:absolute;top:0;left:0;right:0;height:2px;background:#888;"></div>
+                    <p class="idx-name">{name} <span class="tt" tabindex="0">ⓘ<span class="tt-box">{tooltip_text}</span></span></p>
+                    <p class="idx-val" style="color:#888;">—</p>
+                </div>""",
+                unsafe_allow_html=True,
+            )
+            continue
         if chg_val is not None:
             if chg_val >= 2: ic = "#4da6ff"
             elif chg_val <= -2: ic = COLOR_CRISIS
