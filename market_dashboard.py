@@ -18,6 +18,37 @@ except Exception:
 import yfinance as yf
 import requests as req
 import re
+
+# yfinance 호출에 curl_cffi 세션을 주입해 Streamlit Cloud 공유 IP의 YFRateLimitError 완화.
+# 브라우저 TLS 지문(impersonate=chrome)으로 Yahoo rate limit를 대폭 줄임.
+_ORIG_YF_TICKER = yf.Ticker
+_ORIG_YF_DOWNLOAD = yf.download
+
+
+def _yf_ticker_with_session(symbol, *args, **kwargs):
+    if "session" not in kwargs:
+        try:
+            s = _get_cffi_session()
+            if s is not None:
+                kwargs["session"] = s
+        except Exception:
+            pass
+    return _ORIG_YF_TICKER(symbol, *args, **kwargs)
+
+
+def _yf_download_with_session(*args, **kwargs):
+    if "session" not in kwargs:
+        try:
+            s = _get_cffi_session()
+            if s is not None:
+                kwargs["session"] = s
+        except Exception:
+            pass
+    return _ORIG_YF_DOWNLOAD(*args, **kwargs)
+
+
+yf.Ticker = _yf_ticker_with_session
+yf.download = _yf_download_with_session
 try:
     from curl_cffi import requests as cffi_req
 except Exception:
