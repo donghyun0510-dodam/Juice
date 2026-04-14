@@ -105,20 +105,45 @@ def _append_perf_log(scores: dict) -> None:
     try:
         import gspread
         import yfinance as yf
-        from sheet_auth import get_credentials
-        gc = gspread.authorize(get_credentials())
+        # OAuth 토큰을 우선 사용 (SA는 드라이브 쿼터 이슈로 create 불가)
+        import pickle
+        from google.auth.transport.requests import Request
+        token_path = os.path.join(BASE_DIR, "token.pickle")
+        if os.path.exists(token_path):
+            with open(token_path, "rb") as f:
+                creds = pickle.load(f)
+            if creds and creds.expired and creds.refresh_token:
+                creds.refresh(Request())
+                with open(token_path, "wb") as f:
+                    pickle.dump(creds, f)
+        else:
+            from sheet_auth import get_credentials
+            creds = get_credentials()
+        gc = gspread.authorize(creds)
         from googleapiclient.discovery import build
-        drive = build("drive", "v3", credentials=get_credentials())
+        drive = build("drive", "v3", credentials=creds)
 
+        # 미국 현물장 개장 여부 — 폐장 중엔 E-mini S&P500 선물(ES=F) 사용
+        # (KST 월~금 22:30~05:00이 미국 현물 거래시간)
+        from datetime import timezone, timedelta as _td, time as _dtime
+        _kst = datetime.now(timezone(_td(hours=9)))
+        _t, _wd = _kst.time(), _kst.weekday()
+        us_open = (_t >= _dtime(22, 30) and _wd <= 4) or (_t <= _dtime(5, 0) and 1 <= _wd <= 5)
+        use_futures = not us_open
+        sp500_ticker = "ES=F" if use_futures else "^GSPC"
         sp500_close = sp500_chg_pct = None
         try:
-            hist = yf.Ticker("^GSPC").history(period="5d")
+            hist = yf.Ticker(sp500_ticker).history(period="5d")
             if len(hist) >= 1:
                 sp500_close = float(hist["Close"].iloc[-1])
             if len(hist) >= 2:
                 sp500_chg_pct = (sp500_close / float(hist["Close"].iloc[-2]) - 1) * 100
         except Exception:
             pass
+        sp500_close_label = (
+            f"{sp500_close:.2f} (선물)" if (sp500_close is not None and use_futures)
+            else (round(sp500_close, 2) if sp500_close is not None else "")
+        )
 
         q = (f"name='{PERF_SHEET_NAME}' and '{PERF_FOLDER_ID}' in parents "
              "and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false")
@@ -149,7 +174,7 @@ def _append_perf_log(scores: dict) -> None:
             _r(scores.get("c_risk")),
             _r(scores.get("vix_score")),
             _r(scores.get("macro_total")),
-            _r(sp500_close, 2),
+            sp500_close_label,
             _r(sp500_chg_pct, 2),
         ]
         ws.append_row(row)
