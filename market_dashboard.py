@@ -140,7 +140,7 @@ def is_us_cash_open():
 MARKET_OPEN = is_market_open()
 US_CASH_OPEN = is_us_cash_open()  # 모듈 로드 시 초기값 — collect_all_data() 호출 시마다 재평가됨
 if MARKET_OPEN or US_CASH_OPEN:
-    st.markdown('<meta http-equiv="refresh" content="120">', unsafe_allow_html=True)
+    st.markdown('<meta http-equiv="refresh" content="300">', unsafe_allow_html=True)
 
 
 # ══════════════════════════════════════════
@@ -651,7 +651,7 @@ def _compute_yesterday_baseline():
         return {}
 
 
-@st.cache_data(ttl=120)
+@st.cache_data(ttl=300)
 def collect_all_data():
     global US_CASH_OPEN
     US_CASH_OPEN = is_us_cash_open()
