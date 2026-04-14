@@ -25,6 +25,7 @@ PERF_FOLDER_ID = os.environ.get("GSHEET_FOLDER_ID", "1oCzJUMAklZwXqBR67CmvzmFdZG
 PERF_HEADERS = ["날짜", "T-RISK", "FX-RISK", "C-RISK", "VIX점수", "매크로종합",
                 "S&P500 종가", "S&P500 일변동%"]
 TIMESERIES_INTERVAL_MIN = 60
+STATE_SHEET_NAME = "스카우터_알림상태"
 
 
 def _load_env():
@@ -84,7 +85,38 @@ def _grade_with_hysteresis(score: float, prev_grade: str | None) -> str:
     return GRADE_ORDER[new_idx]
 
 
+def _get_state_ws():
+    """스카우터_알림상태 시트의 sheet1 워크시트 반환 (없으면 None)."""
+    try:
+        import gspread
+        from sheet_auth import get_credentials
+        from googleapiclient.discovery import build
+        creds = get_credentials()
+        gc = gspread.authorize(creds)
+        drive = build("drive", "v3", credentials=creds)
+        q = (f"name='{STATE_SHEET_NAME}' and '{PERF_FOLDER_ID}' in parents "
+             "and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false")
+        res = drive.files().list(q=q, fields="files(id, name)").execute()
+        files = res.get("files", [])
+        if not files:
+            return None
+        return gc.open_by_key(files[0]["id"]).sheet1
+    except Exception as e:
+        print(f"[notifier] state 시트 접근 실패: {e}")
+        return None
+
+
 def _load_state() -> dict:
+    # 1순위: 구글 시트 A1에 저장된 JSON
+    ws = _get_state_ws()
+    if ws is not None:
+        try:
+            cell = ws.acell("A1").value
+            if cell:
+                return json.loads(cell)
+        except Exception as e:
+            print(f"[notifier] state 시트 로드 실패, 로컬 폴백: {e}")
+    # 2순위: 로컬 파일
     if os.path.exists(ALERT_STATE_PATH):
         try:
             with open(ALERT_STATE_PATH, "r", encoding="utf-8") as f:
@@ -95,11 +127,19 @@ def _load_state() -> dict:
 
 
 def _save_state(state: dict) -> None:
+    # 로컬 파일 먼저 (항상 시도)
     try:
         with open(ALERT_STATE_PATH, "w", encoding="utf-8") as f:
             json.dump(state, f, ensure_ascii=False, indent=2)
     except Exception as e:
-        print(f"[notifier] state 저장 실패: {e}")
+        print(f"[notifier] state 로컬 저장 실패: {e}")
+    # 구글 시트에도 동기화 (가용 시)
+    ws = _get_state_ws()
+    if ws is not None:
+        try:
+            ws.update(range_name="A1", values=[[json.dumps(state, ensure_ascii=False)]])
+        except Exception as e:
+            print(f"[notifier] state 시트 저장 실패: {e}")
 
 
 def _append_row_to_sheet(sheet_name: str, scores: dict) -> bool:
