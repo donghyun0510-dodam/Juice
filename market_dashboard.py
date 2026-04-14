@@ -198,10 +198,7 @@ def _yf_commodity(ticker_symbol):
 
 
 def get_copper_investing():
-    # investing.com primary ($/톤) → 실패 시 yfinance HG=F($/lb) × 2204.62
-    r = _scrape_investing("https://kr.investing.com/commodities/copper?cid=959211")
-    if r[2] is not None:
-        return r
+    # yfinance HG=F ($/lb) × 2204.62 → $/톤
     y = _yf_commodity("HG=F")
     if y[2] is not None:
         ton = y[2] * 2204.62
@@ -210,47 +207,49 @@ def get_copper_investing():
 
 
 def get_wti_investing():
-    r = _scrape_investing("https://kr.investing.com/commodities/crude-oil")
-    if r[2] is not None: return r
     return _yf_commodity("CL=F")
 
 
 def get_brent_investing():
-    r = _scrape_investing("https://kr.investing.com/commodities/brent-oil")
-    if r[2] is not None: return r
     return _yf_commodity("BZ=F")
 
 
 def get_gold_investing():
-    r = _scrape_investing("https://kr.investing.com/commodities/gold")
-    if r[2] is not None: return r
     return _yf_commodity("GC=F")
 
 
 def get_vix_futures_investing():
-    # Yahoo VX=F 없음 → ^VIX 일봉 종가로 폴백 (현물 폐장 시에도 yfinance는 전일 종가 제공)
-    r = _yf_commodity("^VIX")
-    if r[2] is not None: return r
-    return _scrape_investing("https://kr.investing.com/indices/us-spx-vix-futures")
+    return _yf_commodity("^VIX")
 
 
 def get_silver_investing():
-    r = _scrape_investing("https://kr.investing.com/commodities/silver")
-    if r[2] is not None: return r
     return _yf_commodity("SI=F")
 
 
-# ── 미국 채권: yfinance primary (^TNX/^TYX/^FVX/2YY=F), investing.com 폴백 ──
+# ── 미국 채권: CNBC primary (실시간), yfinance 폴백 (^TNX/^TYX, 15분 지연) ──
 YIELD_YF = {"2Y": "2YY=F", "10Y": "^TNX", "30Y": "^TYX"}
+CNBC_YIELD_SYM = {"2Y": "US2Y", "10Y": "US10Y", "30Y": "US30Y"}
+
+
+def _fetch_cnbc_yield(sym):
+    try:
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
+        resp = req.get(f"https://www.cnbc.com/quotes/{sym}", headers=headers, timeout=15)
+        text = resp.text
+        m_last = re.search(r'QuoteStrip-lastPrice[^>]*>([0-9.]+)', text) or re.search(r'"last":"?([0-9.]+)"?', text)
+        m_chg = re.search(r'QuoteStrip-changePercent[^>]*>\(?(-?[0-9.]+%?)', text) or re.search(r'"change_pct":"([^"]+)"', text)
+        if not m_last:
+            print(f"[cnbc_yield] FAIL sym={sym} status={resp.status_code}", flush=True)
+            return "", "", None
+        val = float(m_last.group(1))
+        return f"{val:.3f}", (m_chg.group(1) if m_chg else ""), val
+    except Exception as e:
+        print(f"[cnbc_yield] EXC sym={sym} {type(e).__name__}: {e}", flush=True)
+        return "", "", None
 
 
 def get_yield_investing(maturity):
-    urls = {
-        "2Y": "https://kr.investing.com/rates-bonds/u.s.-2-year-bond-yield",
-        "10Y": "https://kr.investing.com/rates-bonds/u.s.-10-year-bond-yield",
-        "30Y": "https://kr.investing.com/rates-bonds/u.s.-30-year-bond-yield",
-    }
-    return _scrape_investing(urls[maturity])
+    return _fetch_cnbc_yield(CNBC_YIELD_SYM.get(maturity, ""))
 
 
 def _yf_yield(yf_ticker):
@@ -276,14 +275,8 @@ def _yf_yield(yf_ticker):
 
 
 def get_yield_live(maturity, yf_ticker):
-    """미국 현물 채권장 폐장 중엔 investing.com primary (국채 선물 내재수익률로 실시간 업데이트),
-    개장 중엔 yfinance 1분봉 primary. 실패 시 반대쪽 폴백."""
-    if US_CASH_OPEN:
-        r = _yf_yield(yf_ticker or YIELD_YF.get(maturity, ""))
-        if r[2] is not None:
-            return r
-        return get_yield_investing(maturity)
-    r = get_yield_investing(maturity)
+    """CNBC primary (실시간), yfinance 폴백 (15분 지연)."""
+    r = _fetch_cnbc_yield(CNBC_YIELD_SYM.get(maturity, ""))
     if r[2] is not None:
         return r
     return _yf_yield(yf_ticker or YIELD_YF.get(maturity, ""))
@@ -1228,11 +1221,11 @@ st.markdown("")
 t_g = risk_grade(d["t_risk"], (25, 50, 75))
 with st.expander(f"금리 — T-Risk {d['t_risk']:.0f}점 · {t_g}"):
     rows = []
-    _yld_src = "yfinance (현물장) / Investing.com (폐장)"
+    _yld_src = "CNBC (primary) / yfinance (fallback)"
     for label, key, val, chg in [
-        (_tt("US 2Y",  "2YY=F / u.s.-2-year-bond-yield",  _yld_src, "미국 2년 국채 수익률"),  "2Y",  d["2y"],  d.get("2y_chg")),
-        (_tt("US 10Y", "^TNX / u.s.-10-year-bond-yield",  _yld_src, "미국 10년 국채 수익률"), "10Y", d["10y"], d.get("10y_chg")),
-        (_tt("US 30Y", "^TYX / u.s.-30-year-bond-yield",  _yld_src, "미국 30년 국채 수익률"), "30Y", d["30y"], d.get("30y_chg")),
+        (_tt("US 2Y",  "US2Y / 2YY=F",  _yld_src, "미국 2년 국채 수익률"),  "2Y",  d["2y"],  d.get("2y_chg")),
+        (_tt("US 10Y", "US10Y / ^TNX",  _yld_src, "미국 10년 국채 수익률"), "10Y", d["10y"], d.get("10y_chg")),
+        (_tt("US 30Y", "US30Y / ^TYX",  _yld_src, "미국 30년 국채 수익률"), "30Y", d["30y"], d.get("30y_chg")),
     ]:
         if val is not None:
             g, _ = assess_risk(key, val)
@@ -1264,12 +1257,12 @@ with st.expander(f"환율 — FX-Risk {d['fx_risk']:.0f}점 · {fx_g}"):
 c_g = risk_grade(d["c_risk"], (30, 60, 85))
 with st.expander(f"원자재 — C-Risk {d['c_risk']:.0f}점 · {c_g}"):
     rows = []
-    _com_src = "Investing.com (primary) / yfinance (fallback)"
+    _com_src = "yfinance (15분 지연)"
     for label, key, val, fmt, chg in [
-        (_tt("Brent Crude", "brent-oil / BZ=F", _com_src, "브렌트유 선물"),         "BRN", d["brent"],      "${:.2f}",      d.get("brent_chg")),
-        (_tt("WTI Crude",   "crude-oil / CL=F", _com_src, "서부 텍사스산 원유 선물"), "WTI", d["wti"],        "${:.2f}",      d.get("wti_chg")),
-        (_tt("Copper",      "copper / HG=F",    _com_src, "구리 선물 ($/톤)"),       None,  d["copper"],     "${:,.0f}/톤",  d.get("copper_chg")),
-        (_tt("Silver",      "silver / SI=F",    _com_src, "은 선물"),                None,  d.get("silver"), "${:.2f}",      d.get("silver_chg")),
+        (_tt("Brent Crude", "BZ=F", _com_src, "브렌트유 선물"),         "BRN", d["brent"],      "${:.2f}",      d.get("brent_chg")),
+        (_tt("WTI Crude",   "CL=F", _com_src, "서부 텍사스산 원유 선물"), "WTI", d["wti"],        "${:.2f}",      d.get("wti_chg")),
+        (_tt("Copper",      "HG=F × 2204.62", _com_src, "구리 선물 ($/톤)"), None, d["copper"], "${:,.0f}/톤",  d.get("copper_chg")),
+        (_tt("Silver",      "SI=F", _com_src, "은 선물"),                None,  d.get("silver"), "${:.2f}",      d.get("silver_chg")),
     ]:
         if val is not None:
             v = "" + fmt.format(val) + trend_arrow(chg)
@@ -1298,7 +1291,7 @@ with st.expander(f"위험 심리 — VIX Score {d['vix_score']:.0f}점 · {v_g}"
             vix_label = _tt("CBOE VIX", "^VIX", "yfinance", "CBOE 변동성 지수 (공포지수)")
         rows.append((vix_label, f"{d['vix']:.2f}{trend_arrow(d.get('vix_chg'))}", badge_html(g)))
     if d["gold"] is not None:
-        rows.append((_tt("Gold", "gold / GC=F", "Investing.com (primary) / yfinance (fallback)", "금 현물"), f"${d['gold']:,.0f}{trend_arrow(d.get('gold_chg_str'))}", d.get("gold_chg_str", "")))
+        rows.append((_tt("Gold", "GC=F", "yfinance (15분 지연)", "금 선물"), f"${d['gold']:,.0f}{trend_arrow(d.get('gold_chg_str'))}", d.get("gold_chg_str", "")))
     if d["btc"] is not None:
         rows.append((_tt("Bitcoin", "BTC-USD", "yfinance", "비트코인 가격"), f"${d['btc']:,.0f}", d.get("btc_chg_str", "")))
     st.markdown(detail_table(rows), unsafe_allow_html=True)
