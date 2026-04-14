@@ -158,24 +158,33 @@ def _yf_commodity(ticker_symbol):
 
 
 def get_copper_investing():
-    # HG=F는 $/lb 단위 → $/톤으로 환산 (1 short ton = 2204.62 lb)
-    r = _yf_commodity("HG=F")
+    # investing.com primary ($/톤) → 실패 시 yfinance HG=F($/lb) × 2204.62
+    r = _scrape_investing("https://kr.investing.com/commodities/copper?cid=959211")
     if r[2] is not None:
-        ton = r[2] * 2204.62
-        return f"{ton:,.0f}", r[1], ton
-    return _scrape_investing("https://kr.investing.com/commodities/copper?cid=959211")
+        return r
+    y = _yf_commodity("HG=F")
+    if y[2] is not None:
+        ton = y[2] * 2204.62
+        return f"{ton:,.0f}", y[1], ton
+    return "", "", None
 
 
 def get_wti_investing():
-    r = _yf_commodity("CL=F")
+    r = _scrape_investing("https://kr.investing.com/commodities/crude-oil")
     if r[2] is not None: return r
-    return _scrape_investing("https://kr.investing.com/commodities/crude-oil")
+    return _yf_commodity("CL=F")
+
+
+def get_brent_investing():
+    r = _scrape_investing("https://kr.investing.com/commodities/brent-oil")
+    if r[2] is not None: return r
+    return _yf_commodity("BZ=F")
 
 
 def get_gold_investing():
-    r = _yf_commodity("GC=F")
+    r = _scrape_investing("https://kr.investing.com/commodities/gold")
     if r[2] is not None: return r
-    return _scrape_investing("https://kr.investing.com/commodities/gold")
+    return _yf_commodity("GC=F")
 
 
 def get_vix_futures_investing():
@@ -186,9 +195,9 @@ def get_vix_futures_investing():
 
 
 def get_silver_investing():
-    r = _yf_commodity("SI=F")
+    r = _scrape_investing("https://kr.investing.com/commodities/silver")
     if r[2] is not None: return r
-    return _scrape_investing("https://kr.investing.com/commodities/silver")
+    return _yf_commodity("SI=F")
 
 
 # ── 미국 채권: yfinance primary (^TNX/^TYX/^FVX/2YY=F), investing.com 폴백 ──
@@ -227,11 +236,17 @@ def _yf_yield(yf_ticker):
 
 
 def get_yield_live(maturity, yf_ticker):
-    """yfinance primary, investing.com 폴백. yf_ticker 인자는 호환성용 (내부에서 YIELD_YF 사용)."""
-    r = _yf_yield(yf_ticker or YIELD_YF.get(maturity, ""))
+    """미국 현물 채권장 폐장 중엔 investing.com primary (국채 선물 내재수익률로 실시간 업데이트),
+    개장 중엔 yfinance 1분봉 primary. 실패 시 반대쪽 폴백."""
+    if US_CASH_OPEN:
+        r = _yf_yield(yf_ticker or YIELD_YF.get(maturity, ""))
+        if r[2] is not None:
+            return r
+        return get_yield_investing(maturity)
+    r = get_yield_investing(maturity)
     if r[2] is not None:
         return r
-    return get_yield_investing(maturity)
+    return _yf_yield(yf_ticker or YIELD_YF.get(maturity, ""))
 
 
 def scrape_yahoo_quote(url, symbol=None):
@@ -563,7 +578,7 @@ def collect_all_data():
         f_copper = ex.submit(get_copper_investing)
         f_gold = ex.submit(get_gold_investing)
         f_silver = ex.submit(get_silver_investing)
-        f_brent = ex.submit(get_price_and_change, "BZ=F")
+        f_brent = ex.submit(get_brent_investing)
     _, data["wti_chg"], data["wti"] = f_wti.result()
     _, data["brent_chg"], data["brent"] = f_brent.result()
     _, data["copper_chg"], data["copper"] = f_copper.result()
