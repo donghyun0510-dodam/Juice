@@ -733,8 +733,9 @@ def collect_all_data():
         pass
 
     try:
-        from notifier import check_and_notify_macro
+        from notifier import check_and_notify_macro, log_timeseries_if_due
         check_and_notify_macro(data.get("macro_total"), scores=data)
+        log_timeseries_if_due(data)
     except Exception as e:
         print(f"[macro alert] skip: {e}")
 

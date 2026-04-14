@@ -20,9 +20,11 @@ GRADE_ORDER = ["안정", "주의", "위험", "고위험"]
 
 # 성과 기록 시트
 PERF_SHEET_NAME = "스카우터_성과자료_v2"
+TIMESERIES_SHEET_NAME = "스카우터_매크로_타임시리즈"
 PERF_FOLDER_ID = os.environ.get("GSHEET_FOLDER_ID", "1oCzJUMAklZwXqBR67CmvzmFdZGg3wLuv")
 PERF_HEADERS = ["날짜", "T-RISK", "FX-RISK", "C-RISK", "VIX점수", "매크로종합",
                 "S&P500 종가", "S&P500 일변동%"]
+TIMESERIES_INTERVAL_MIN = 60
 
 
 def _load_env():
@@ -100,8 +102,8 @@ def _save_state(state: dict) -> None:
         print(f"[notifier] state 저장 실패: {e}")
 
 
-def _append_perf_log(scores: dict) -> None:
-    """매크로 알림 발생 시점의 메트릭을 스카우터_성과자료 시트에 누적 기록."""
+def _append_row_to_sheet(sheet_name: str, scores: dict) -> bool:
+    """주어진 시트명에 현재 매크로 메트릭 + S&P500 한 행 append. 성공 시 True."""
     try:
         import gspread
         import yfinance as yf
@@ -145,14 +147,14 @@ def _append_perf_log(scores: dict) -> None:
             else (round(sp500_close, 2) if sp500_close is not None else "")
         )
 
-        q = (f"name='{PERF_SHEET_NAME}' and '{PERF_FOLDER_ID}' in parents "
+        q = (f"name='{sheet_name}' and '{PERF_FOLDER_ID}' in parents "
              "and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false")
         res = drive.files().list(q=q, fields="files(id, name)").execute()
         files = res.get("files", [])
         if files:
             sh = gc.open_by_key(files[0]["id"])
         else:
-            sh = gc.create(PERF_SHEET_NAME, folder_id=PERF_FOLDER_ID)
+            sh = gc.create(sheet_name, folder_id=PERF_FOLDER_ID)
         ws = sh.sheet1
         existing = ws.get_all_values()
         if not existing or existing[0] != PERF_HEADERS:
@@ -178,9 +180,34 @@ def _append_perf_log(scores: dict) -> None:
             _r(sp500_chg_pct, 2),
         ]
         ws.append_row(row)
-        print(f"[notifier] {PERF_SHEET_NAME} 기록 추가: {ts_label}")
+        print(f"[notifier] {sheet_name} 기록 추가: {ts_label}")
+        return True
     except Exception as e:
-        print(f"[notifier] 성과자료 기록 실패: {e}")
+        print(f"[notifier] {sheet_name} 기록 실패: {e}")
+        return False
+
+
+def _append_perf_log(scores: dict) -> None:
+    _append_row_to_sheet(PERF_SHEET_NAME, scores)
+
+
+def log_timeseries_if_due(scores: dict) -> None:
+    """60분 간격으로 타임시리즈 시트에 전수 기록."""
+    if not scores:
+        return
+    state = _load_state()
+    last_ts = state.get("last_timeseries_ts")
+    now = datetime.now()
+    if last_ts:
+        try:
+            elapsed = (now - datetime.fromisoformat(last_ts)).total_seconds() / 60
+            if elapsed < TIMESERIES_INTERVAL_MIN:
+                return
+        except Exception:
+            pass
+    if _append_row_to_sheet(TIMESERIES_SHEET_NAME, scores):
+        state["last_timeseries_ts"] = now.isoformat()
+        _save_state(state)
 
 
 def check_and_notify_macro(macro_total: float, scores: dict | None = None) -> None:
