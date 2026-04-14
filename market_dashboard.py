@@ -144,8 +144,10 @@ def _scrape_investing(url):
         price_str = price_match.group(1).strip() if price_match else ""
         change_str = change_match.group(1).strip() if change_match else ""
         price_val = float(price_str.replace(",", "")) if price_str else None
+        print(f"[scrape_investing] url={url} status={resp.status_code} len={len(text)} match={price_str!r}", flush=True)
         return price_str, change_str, price_val
-    except Exception:
+    except Exception as e:
+        print(f"[scrape_investing] url={url} EXC {type(e).__name__}: {e}", flush=True)
         return "", "", None
 
 
