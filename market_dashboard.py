@@ -4,7 +4,17 @@
 실행: streamlit run market_dashboard.py
 """
 
+import os as _os
 import streamlit as st
+
+# Streamlit Cloud Secrets → 환경변수 브릿지 (notifier/sheet_auth는 os.environ을 읽음)
+try:
+    for _k in ("GOOGLE_SA_JSON", "GMAIL_APP_PASSWORD", "GSHEET_FOLDER_ID"):
+        if _k in st.secrets and _k not in _os.environ:
+            _os.environ[_k] = str(st.secrets[_k])
+except Exception:
+    pass
+
 import yfinance as yf
 import requests as req
 import re

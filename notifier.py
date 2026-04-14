@@ -107,20 +107,10 @@ def _append_row_to_sheet(sheet_name: str, scores: dict) -> bool:
     try:
         import gspread
         import yfinance as yf
-        # OAuth 토큰을 우선 사용 (SA는 드라이브 쿼터 이슈로 create 불가)
-        import pickle
-        from google.auth.transport.requests import Request
-        token_path = os.path.join(BASE_DIR, "token.pickle")
-        if os.path.exists(token_path):
-            with open(token_path, "rb") as f:
-                creds = pickle.load(f)
-            if creds and creds.expired and creds.refresh_token:
-                creds.refresh(Request())
-                with open(token_path, "wb") as f:
-                    pickle.dump(creds, f)
-        else:
-            from sheet_auth import get_credentials
-            creds = get_credentials()
+        # 클라우드 우선: SA(GOOGLE_SA_JSON) → 로컬 OAuth 토큰 순
+        # sheet_auth.get_credentials()가 이미 SA env → SA 파일 → OAuth 순으로 처리
+        from sheet_auth import get_credentials
+        creds = get_credentials()
         gc = gspread.authorize(creds)
         from googleapiclient.discovery import build
         drive = build("drive", "v3", credentials=creds)
@@ -151,10 +141,11 @@ def _append_row_to_sheet(sheet_name: str, scores: dict) -> bool:
              "and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false")
         res = drive.files().list(q=q, fields="files(id, name)").execute()
         files = res.get("files", [])
-        if files:
-            sh = gc.open_by_key(files[0]["id"])
-        else:
-            sh = gc.create(sheet_name, folder_id=PERF_FOLDER_ID)
+        if not files:
+            # SA는 파일 생성 권한이 없음 — 시트를 사전에 개인 계정으로 만들고 SA에 공유해야 함
+            print(f"[notifier] {sheet_name} 시트가 폴더에 없음 — 사전 생성 필요")
+            return False
+        sh = gc.open_by_key(files[0]["id"])
         ws = sh.sheet1
         existing = ws.get_all_values()
         if not existing or existing[0] != PERF_HEADERS:
