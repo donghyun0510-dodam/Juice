@@ -1093,6 +1093,10 @@ def badge_html(g):
     cls = {"안정": "safe", "주의": "caution", "위험": "danger", "고위험": "crisis"}.get(g, "safe")
     return f'<span class="badge badge-{cls}">{g}</span>'
 
+def _tt(name, tkr, source, desc):
+    tooltip_text = f"티커: {tkr}<br>출처: {source}<br>{desc}"
+    return f'{name} <span class="tt" tabindex="0">ⓘ<span class="tt-box">{tooltip_text}</span></span>'
+
 def detail_table(rows):
     """rows: list of (label, value_str, status_html)"""
     html = '<table class="detail-table"><tr><th>체크포인트</th><th>수치</th><th>상태</th></tr>'
@@ -1186,10 +1190,11 @@ st.markdown("")
 t_g = risk_grade(d["t_risk"], (25, 50, 75))
 with st.expander(f"금리 — T-Risk {d['t_risk']:.0f}점 · {t_g}"):
     rows = []
+    _yld_src = "yfinance (현물장) / Investing.com (폐장)"
     for label, key, val, chg in [
-        ("US 2Y", "2Y", d["2y"], d.get("2y_chg")),
-        ("US 10Y", "10Y", d["10y"], d.get("10y_chg")),
-        ("US 30Y", "30Y", d["30y"], d.get("30y_chg")),
+        (_tt("US 2Y",  "2YY=F / u.s.-2-year-bond-yield",  _yld_src, "미국 2년 국채 수익률"),  "2Y",  d["2y"],  d.get("2y_chg")),
+        (_tt("US 10Y", "^TNX / u.s.-10-year-bond-yield",  _yld_src, "미국 10년 국채 수익률"), "10Y", d["10y"], d.get("10y_chg")),
+        (_tt("US 30Y", "^TYX / u.s.-30-year-bond-yield",  _yld_src, "미국 30년 국채 수익률"), "30Y", d["30y"], d.get("30y_chg")),
     ]:
         if val is not None:
             g, _ = assess_risk(key, val)
@@ -1199,7 +1204,7 @@ with st.expander(f"금리 — T-Risk {d['t_risk']:.0f}점 · {t_g}"):
         if sp < 0: sp_b = badge_html("위험")
         elif sp < 0.3: sp_b = badge_html("주의")
         else: sp_b = badge_html("안정")
-        rows.append(("Yield Spread (10Y-2Y)", f"{sp:+.2f}%p", sp_b))
+        rows.append((_tt("Yield Spread (10Y-2Y)", "^TNX − 2YY=F", "계산값", "장단기 금리차 (음수 = 역전)"), f"{sp:+.2f}%p", sp_b))
     st.markdown(detail_table(rows), unsafe_allow_html=True)
 
 # ── 환율 세부 ──
@@ -1207,9 +1212,9 @@ fx_g = risk_grade(d["fx_risk"], (30, 60, 85))
 with st.expander(f"환율 — FX-Risk {d['fx_risk']:.0f}점 · {fx_g}"):
     rows = []
     for label, key, val, fmt, chg in [
-        ("DXY", "DXY", d["dxy"], "{:.2f}", d.get("dxy_chg")),
-        ("USD/JPY", "USD/JPY", d["usd_jpy"], "{:.2f}", d.get("usd_jpy_chg")),
-        ("USD/CNY", "USD/CNY", d["usd_cny"], "{:.4f}", d.get("usd_cny_chg")),
+        (_tt("DXY",     "DX-Y.NYB", "yfinance", "달러 인덱스 (6개 통화 바스켓)"),    "DXY",     d["dxy"],     "{:.2f}", d.get("dxy_chg")),
+        (_tt("USD/JPY", "JPY=X",    "yfinance", "달러/엔 환율"),                        "USD/JPY", d["usd_jpy"], "{:.2f}", d.get("usd_jpy_chg")),
+        (_tt("USD/CNY", "CNY=X",    "yfinance", "달러/위안 환율"),                      "USD/CNY", d["usd_cny"], "{:.4f}", d.get("usd_cny_chg")),
     ]:
         if val is not None:
             v = fmt.format(val) + trend_arrow(chg)
@@ -1221,25 +1226,26 @@ with st.expander(f"환율 — FX-Risk {d['fx_risk']:.0f}점 · {fx_g}"):
 c_g = risk_grade(d["c_risk"], (30, 60, 85))
 with st.expander(f"원자재 — C-Risk {d['c_risk']:.0f}점 · {c_g}"):
     rows = []
+    _com_src = "Investing.com (primary) / yfinance (fallback)"
     for label, key, val, fmt, chg in [
-        ("Brent Crude", "BRN", d["brent"], "${:.2f}", d.get("brent_chg")),
-        ("WTI Crude", "WTI", d["wti"], "${:.2f}", d.get("wti_chg")),
-        ("Copper", None, d["copper"], "${:,.0f}/톤", d.get("copper_chg")),
-        ("Silver", None, d.get("silver"), "${:.2f}", d.get("silver_chg")),
+        (_tt("Brent Crude", "brent-oil / BZ=F", _com_src, "브렌트유 선물"),         "BRN", d["brent"],      "${:.2f}",      d.get("brent_chg")),
+        (_tt("WTI Crude",   "crude-oil / CL=F", _com_src, "서부 텍사스산 원유 선물"), "WTI", d["wti"],        "${:.2f}",      d.get("wti_chg")),
+        (_tt("Copper",      "copper / HG=F",    _com_src, "구리 선물 ($/톤)"),       None,  d["copper"],     "${:,.0f}/톤",  d.get("copper_chg")),
+        (_tt("Silver",      "silver / SI=F",    _com_src, "은 선물"),                None,  d.get("silver"), "${:.2f}",      d.get("silver_chg")),
     ]:
         if val is not None:
             v = "<span style='color:#22c55e;font-weight:600'>(실)</span> " + fmt.format(val) + trend_arrow(chg)
             b = badge_html(assess_risk(key, val)[0]) if key else "—"
             rows.append((label, v, b))
     if d["oil_avg"] is not None:
-        rows.append(("Oil Average", f"${d['oil_avg']:.1f}", "—"))
+        rows.append((_tt("Oil Average", "(WTI + Brent) / 2", "계산값", "유가 평균"), f"${d['oil_avg']:.1f}", "—"))
     if d["gc_ratio"] is not None:
         gcr = d["gc_ratio"]
         if gcr < 0.35: gcg = "안정"
         elif gcr <= 0.45: gcg = "주의"
         elif gcr <= 0.55: gcg = "위험"
         else: gcg = "고위험"
-        rows.append(("Gold/Copper Ratio", f"{gcr:.3f}", badge_html(gcg)))
+        rows.append((_tt("Gold/Copper Ratio", "Gold ÷ Copper", "계산값", "금/구리 비율 (높을수록 경기 둔화 시그널)"), f"{gcr:.3f}", badge_html(gcg)))
     st.markdown(detail_table(rows), unsafe_allow_html=True)
 
 # ── 위험 심리 세부 ──
@@ -1248,12 +1254,15 @@ with st.expander(f"위험 심리 — VIX Score {d['vix_score']:.0f}점 · {v_g}"
     rows = []
     if d["vix"] is not None:
         g, _ = assess_risk("VIX", d["vix"])
-        vix_label = "CBOE VIX (선물)" if d.get("vix_is_futures") else "CBOE VIX"
+        if d.get("vix_is_futures"):
+            vix_label = _tt("CBOE VIX (선물)", "^VIX", "yfinance", "VIX 선물 (현물 폐장 시)")
+        else:
+            vix_label = _tt("CBOE VIX", "^VIX", "yfinance", "CBOE 변동성 지수 (공포지수)")
         rows.append((vix_label, f"<span style='color:#22c55e;font-weight:600'>(실)</span> {d['vix']:.2f}{trend_arrow(d.get('vix_chg'))}", badge_html(g)))
     if d["gold"] is not None:
-        rows.append(("Gold", f"<span style='color:#22c55e;font-weight:600'>(실)</span> ${d['gold']:,.0f}{trend_arrow(d.get('gold_chg_str'))}", d.get("gold_chg_str", "")))
+        rows.append((_tt("Gold", "gold / GC=F", "Investing.com (primary) / yfinance (fallback)", "금 현물"), f"<span style='color:#22c55e;font-weight:600'>(실)</span> ${d['gold']:,.0f}{trend_arrow(d.get('gold_chg_str'))}", d.get("gold_chg_str", "")))
     if d["btc"] is not None:
-        rows.append(("Bitcoin", f"${d['btc']:,.0f}", d.get("btc_chg_str", "")))
+        rows.append((_tt("Bitcoin", "BTC-USD", "yfinance", "비트코인 가격"), f"${d['btc']:,.0f}", d.get("btc_chg_str", "")))
     st.markdown(detail_table(rows), unsafe_allow_html=True)
 
 # ── 지수 동향 ──
