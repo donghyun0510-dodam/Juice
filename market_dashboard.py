@@ -1236,7 +1236,7 @@ with st.expander(f"금리 — T-Risk {d['t_risk']:.0f}점 · {t_g}"):
     ]:
         if val is not None:
             g, _ = assess_risk(key, val)
-            rows.append((label, f"<span style='color:#22c55e;font-weight:600'>(실)</span> {val:.3f}%{trend_arrow(chg)}", badge_html(g)))
+            rows.append((label, f"{val:.3f}%{trend_arrow(chg)}", badge_html(g)))
     if d["spread"] is not None:
         sp = d["spread"]
         if sp < 0: sp_b = badge_html("위험")
@@ -1272,7 +1272,7 @@ with st.expander(f"원자재 — C-Risk {d['c_risk']:.0f}점 · {c_g}"):
         (_tt("Silver",      "silver / SI=F",    _com_src, "은 선물"),                None,  d.get("silver"), "${:.2f}",      d.get("silver_chg")),
     ]:
         if val is not None:
-            v = "<span style='color:#22c55e;font-weight:600'>(실)</span> " + fmt.format(val) + trend_arrow(chg)
+            v = "" + fmt.format(val) + trend_arrow(chg)
             b = badge_html(assess_risk(key, val)[0]) if key else "—"
             rows.append((label, v, b))
     if d["oil_avg"] is not None:
@@ -1296,9 +1296,9 @@ with st.expander(f"위험 심리 — VIX Score {d['vix_score']:.0f}점 · {v_g}"
             vix_label = _tt("CBOE VIX (선물)", "^VIX", "yfinance", "VIX 선물 (현물 폐장 시)")
         else:
             vix_label = _tt("CBOE VIX", "^VIX", "yfinance", "CBOE 변동성 지수 (공포지수)")
-        rows.append((vix_label, f"<span style='color:#22c55e;font-weight:600'>(실)</span> {d['vix']:.2f}{trend_arrow(d.get('vix_chg'))}", badge_html(g)))
+        rows.append((vix_label, f"{d['vix']:.2f}{trend_arrow(d.get('vix_chg'))}", badge_html(g)))
     if d["gold"] is not None:
-        rows.append((_tt("Gold", "gold / GC=F", "Investing.com (primary) / yfinance (fallback)", "금 현물"), f"<span style='color:#22c55e;font-weight:600'>(실)</span> ${d['gold']:,.0f}{trend_arrow(d.get('gold_chg_str'))}", d.get("gold_chg_str", "")))
+        rows.append((_tt("Gold", "gold / GC=F", "Investing.com (primary) / yfinance (fallback)", "금 현물"), f"${d['gold']:,.0f}{trend_arrow(d.get('gold_chg_str'))}", d.get("gold_chg_str", "")))
     if d["btc"] is not None:
         rows.append((_tt("Bitcoin", "BTC-USD", "yfinance", "비트코인 가격"), f"${d['btc']:,.0f}", d.get("btc_chg_str", "")))
     st.markdown(detail_table(rows), unsafe_allow_html=True)
