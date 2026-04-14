@@ -44,3 +44,4 @@ task_global_utf16.xml
 .claude/agents/signal-judge.md
 sa_credentials.json
 trendfollow-scouter-*.json
+news_test.py
