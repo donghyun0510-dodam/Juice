@@ -159,19 +159,31 @@ def _live_and_prev(tk):
     daily = tk.history(period="5d")
     if len(daily) < 1:
         return live, None
-    if live is None:
-        if len(daily) < 2:
-            return None, None
+    # prev는 "오늘 이전의 마지막 일봉 종가"여야 함.
+    # 일봉 마지막 행 날짜가 오늘이면 그 행은 미완성 candle → iloc[-2]가 prev.
+    # 오늘이 아니면 iloc[-1]이 어제 종가 = prev.
+    try:
+        from datetime import datetime as _dt
+        last_idx_date = daily.index[-1].date() if len(daily) else None
+        today_utc = _dt.utcnow().date()
+    except Exception:
+        last_idx_date = None
+        today_utc = None
+
+    def _prev_close():
+        if last_idx_date is not None and today_utc is not None and last_idx_date == today_utc:
+            if len(daily) >= 2:
+                return float(daily["Close"].iloc[-2])
+            return None
+        return float(daily["Close"].iloc[-1]) if len(daily) >= 1 else None
+
+    prev = _prev_close()
+    if live is not None:
+        return live, prev
+    # live 없으면 가용한 가장 최근 일봉 종가를 last로, 그 이전 일봉을 prev로
+    if len(daily) >= 2:
         return float(daily["Close"].iloc[-1]), float(daily["Close"].iloc[-2])
-    # 장중: 일봉의 마지막 행은 오늘(=live와 동일한 값)일 수 있으므로 어제 종가를 사용.
-    # live와 iloc[-1]가 유사하면 iloc[-2]를 prev로, 아니면 iloc[-1]를 prev로 사용.
-    if len(daily) < 2:
-        return live, float(daily["Close"].iloc[-1])
-    last_daily = float(daily["Close"].iloc[-1])
-    prev_daily = float(daily["Close"].iloc[-2])
-    if last_daily > 0 and abs(live - last_daily) / last_daily < 0.001:
-        return live, prev_daily
-    return live, last_daily
+    return None, None
 
 
 def get_price_and_change(ticker_symbol):
