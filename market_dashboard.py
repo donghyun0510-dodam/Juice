@@ -163,7 +163,15 @@ def _live_and_prev(tk):
         if len(daily) < 2:
             return None, None
         return float(daily["Close"].iloc[-1]), float(daily["Close"].iloc[-2])
-    return live, float(daily["Close"].iloc[-1])
+    # 장중: 일봉의 마지막 행은 오늘(=live와 동일한 값)일 수 있으므로 어제 종가를 사용.
+    # live와 iloc[-1]가 유사하면 iloc[-2]를 prev로, 아니면 iloc[-1]를 prev로 사용.
+    if len(daily) < 2:
+        return live, float(daily["Close"].iloc[-1])
+    last_daily = float(daily["Close"].iloc[-1])
+    prev_daily = float(daily["Close"].iloc[-2])
+    if last_daily > 0 and abs(live - last_daily) / last_daily < 0.001:
+        return live, prev_daily
+    return live, last_daily
 
 
 def get_price_and_change(ticker_symbol):
