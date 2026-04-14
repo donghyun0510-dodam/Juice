@@ -236,19 +236,43 @@ def _scrape_investing(url):
         return "", "", None
 
 
+def _yf_commodity_2f(ticker, multiplier=1.0, fmt="{:,.2f}"):
+    """yfinance 일봉 종가로 원자재 가격·등락률 반환."""
+    try:
+        tk = yf.Ticker(ticker)
+        h = tk.history(period="10d")["Close"].dropna()
+        if len(h) >= 2:
+            last = float(h.iloc[-1]) * multiplier
+            prev = float(h.iloc[-2]) * multiplier
+            chg = (last - prev) / prev * 100
+            return fmt.format(last), f"{chg:+.2f}%", last
+    except Exception:
+        pass
+    return "", "", None
+
+
 def get_copper_investing():
+    # HG=F는 $/lb → $/톤 환산 (1 short ton = 2204.62 lb)
+    r = _yf_commodity_2f("HG=F", multiplier=2204.62, fmt="{:,.0f}")
+    if r[2] is not None: return r
     return _scrape_investing("https://kr.investing.com/commodities/copper?cid=959211")
 
 
 def get_wti_investing():
+    r = _yf_commodity_2f("CL=F")
+    if r[2] is not None: return r
     return _scrape_investing("https://kr.investing.com/commodities/crude-oil")
 
 
 def get_gold_investing():
+    r = _yf_commodity_2f("GC=F", fmt="{:,.0f}")
+    if r[2] is not None: return r
     return _scrape_investing("https://kr.investing.com/commodities/gold")
 
 
 def get_silver_investing():
+    r = _yf_commodity_2f("SI=F")
+    if r[2] is not None: return r
     return _scrape_investing("https://kr.investing.com/commodities/silver")
 
 
@@ -337,8 +361,7 @@ def compute_c_risk_index(wti_val, brent_val, gold_val, copper_val,
     gc_ratio = None
     if gold_val is not None and copper_val is not None and copper_val > 0:
         gc_ratio = gold_val / copper_val
-        # 300→0, 700→25 선형 (Gold $/oz ÷ Copper $/lb)
-        gc_score = max(0, min(25, (gc_ratio - 300) / 400 * 25))
+        gc_score = max(0, min(25, (gc_ratio - 0.35) / 0.20 * 20))
 
     # 단기 모멘텀
     momentum = 0

@@ -158,8 +158,11 @@ def _yf_commodity(ticker_symbol):
 
 
 def get_copper_investing():
+    # HG=F는 $/lb 단위 → $/톤으로 환산 (1 short ton = 2204.62 lb)
     r = _yf_commodity("HG=F")
-    if r[2] is not None: return r
+    if r[2] is not None:
+        ton = r[2] * 2204.62
+        return f"{ton:,.0f}", r[1], ton
     return _scrape_investing("https://kr.investing.com/commodities/copper?cid=959211")
 
 
@@ -390,13 +393,13 @@ def compute_c_risk(wti, brent, gold, copper, silver=None, btc_chg=None,
         oil_score = max(0, min(40, (oil_avg - 85) / 20 * 30))
 
     # 2) G/C Ratio 수준: 선형 (regime 지표, 비중 축소)
-    # Gold($/oz) ÷ Copper($/lb): 역사적 300~800 범위, 높을수록 경기 둔화 신호
+    # Gold($/oz) ÷ Copper($/톤): 정상 0.35~0.55, 높을수록 경기 둔화 신호
     gc_score = 0
     gc_ratio = None
     if gold is not None and copper is not None and copper > 0:
         gc_ratio = gold / copper
-        # 300→0, 700→25 선형, 극단값 캡
-        gc_score = max(0, min(25, (gc_ratio - 300) / 400 * 25))
+        # 0.35→0, 0.55→20 선형, 극단값 캡
+        gc_score = max(0, min(25, (gc_ratio - 0.35) / 0.20 * 20))
 
     # 3) 단기 모멘텀: 원자재·BTC의 일변동 절대값 합산 (2% 이상부터 가산)
     momentum = 0
@@ -731,8 +734,8 @@ def generate_diagnosis(d):
     # 원자재 세부
     if d["oil_avg"] is not None and d["oil_avg"] > 95:
         lines.append(f"유가 고가 구간 (WTI/BRN 평균 ${d['oil_avg']:.1f}) — 인플레이션 재점화 리스크")
-    if d["gc_ratio"] is not None and d["gc_ratio"] > 500:
-        lines.append(f"금/구리 비율 상승 ({d['gc_ratio']:.1f}) — 경기 둔화 반영")
+    if d["gc_ratio"] is not None and d["gc_ratio"] > 0.45:
+        lines.append(f"금/구리 비율 상승 ({d['gc_ratio']:.3f}) — 경기 둔화 반영")
 
     # VIX 세부
     if d["vix"] is not None:
@@ -1204,7 +1207,7 @@ with st.expander(f"원자재 — C-Risk {d['c_risk']:.0f}점 · {c_g}"):
     for label, key, val, fmt, chg in [
         ("Brent Crude", "BRN", d["brent"], "${:.2f}", d.get("brent_chg")),
         ("WTI Crude", "WTI", d["wti"], "${:.2f}", d.get("wti_chg")),
-        ("Copper (COMEX)", None, d["copper"], "${:.3f}/lb", d.get("copper_chg")),
+        ("Copper", None, d["copper"], "${:,.0f}/톤", d.get("copper_chg")),
         ("Silver", None, d.get("silver"), "${:.2f}", d.get("silver_chg")),
     ]:
         if val is not None:
@@ -1215,11 +1218,11 @@ with st.expander(f"원자재 — C-Risk {d['c_risk']:.0f}점 · {c_g}"):
         rows.append(("Oil Average", f"${d['oil_avg']:.1f}", "—"))
     if d["gc_ratio"] is not None:
         gcr = d["gc_ratio"]
-        if gcr < 300: gcg = "안정"
-        elif gcr <= 500: gcg = "주의"
-        elif gcr <= 700: gcg = "위험"
+        if gcr < 0.35: gcg = "안정"
+        elif gcr <= 0.45: gcg = "주의"
+        elif gcr <= 0.55: gcg = "위험"
         else: gcg = "고위험"
-        rows.append(("Gold/Copper Ratio", f"{gcr:.1f}", badge_html(gcg)))
+        rows.append(("Gold/Copper Ratio", f"{gcr:.3f}", badge_html(gcg)))
     st.markdown(detail_table(rows), unsafe_allow_html=True)
 
 # ── 위험 심리 세부 ──
