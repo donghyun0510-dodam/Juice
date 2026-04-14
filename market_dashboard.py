@@ -732,6 +732,12 @@ def collect_all_data():
     except Exception:
         pass
 
+    try:
+        from notifier import check_and_notify_macro
+        check_and_notify_macro(data.get("macro_total"))
+    except Exception as e:
+        print(f"[macro alert] skip: {e}")
+
     return data
 
 
