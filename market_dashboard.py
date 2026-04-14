@@ -189,10 +189,12 @@ def get_change_pct(ticker_symbol):
         tk = yf.Ticker(ticker_symbol)
         last_close, prev_close = _live_and_prev(tk)
         if last_close is None or prev_close is None:
+            print(f"[get_change_pct] {ticker_symbol}: last={last_close} prev={prev_close} — empty", flush=True)
             return "", None
         pct = (last_close - prev_close) / prev_close * 100
         return f"{pct:+.2f}%", pct
-    except Exception:
+    except Exception as e:
+        print(f"[get_change_pct] {ticker_symbol}: EXC {type(e).__name__}: {e}", flush=True)
         return "", None
 
 
