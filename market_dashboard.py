@@ -8,6 +8,10 @@ import streamlit as st
 import yfinance as yf
 import requests as req
 import re
+try:
+    from curl_cffi import requests as cffi_req
+except Exception:
+    cffi_req = None
 import json
 import os
 from datetime import datetime, timedelta
@@ -137,7 +141,10 @@ def _scrape_investing(url):
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             "Accept-Language": "ko-KR,ko;q=0.9",
         }
-        resp = req.get(url, headers=headers, timeout=15)
+        if cffi_req is not None:
+            resp = cffi_req.get(url, headers=headers, timeout=15, impersonate="chrome")
+        else:
+            resp = req.get(url, headers=headers, timeout=15)
         text = resp.text
         price_match = re.search(r'data-test="instrument-price-last"[^>]*>([^<]+)', text)
         change_match = re.search(r'data-test="instrument-price-change-percent"[^>]*>([^<]+)', text)
