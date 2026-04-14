@@ -1746,9 +1746,9 @@ def build_korea_sheet(target_date):
 # ── 메인 실행 ──
 PERF_SHEET_NAME = "스카우터_성과자료"
 PERF_HEADERS = ["날짜", "T-RISK", "FX-RISK", "C-RISK", "VIX점수", "매크로종합",
-                "VIX값", "DXY", "US10Y", "Oil평균", "S&P500 종가", "S&P500 일변동%"]
+                "S&P500 종가", "S&P500 일변동%"]
 PERF_KEYS = ["date", "t_risk", "fx_risk", "c_risk", "vix_score", "macro_total",
-             "vix", "dxy", "us_10y", "oil_avg", "sp500_close", "sp500_chg_pct"]
+             "sp500_close", "sp500_chg_pct"]
 
 
 def append_performance_log(perf):
@@ -1924,10 +1924,8 @@ def main():
             ws_korea.batch_format(kr_fmt_list)
         print("  국장 시트 작성 완료")
 
-    # 성과 추적 시트에 하루치 매크로 메트릭 + S&P500 종가 누적
-    if perf_metrics:
-        print(f"\n성과 추적 기록 중...")
-        append_performance_log(perf_metrics)
+    # 성과 추적 시트 기록은 market_dashboard.py의 매크로 알림 트리거에서 수행
+    # (매크로 점수 ±10 변동 또는 등급 전환 시에만 append)
 
     print(f"\n=== 완료! ===")
     print(f"파일명: {sheet_name}")

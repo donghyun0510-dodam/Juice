@@ -29,11 +29,6 @@
     "trigger_close": 93700.0,
     "name": "SK텔레콤"
   },
-  "278470.KS": {
-    "first_long_date": "2026-04-13",
-    "trigger_close": 399500.0,
-    "name": "에이피알"
-  },
   "032640.KS": {
     "first_long_date": "2026-04-13",
     "trigger_close": 17280.0,
@@ -68,11 +63,6 @@
     "first_long_date": "2026-04-13",
     "trigger_close": 23750.0,
     "name": "대우건설"
-  },
-  "066970.KS": {
-    "first_long_date": "2026-04-13",
-    "trigger_close": 181400.0,
-    "name": "엘앤에프"
   },
   "267270.KS": {
     "first_long_date": "2026-04-13",
@@ -113,5 +103,60 @@
     "first_long_date": "2026-04-13",
     "trigger_close": 66400.0,
     "name": "심텍"
+  },
+  "032830.KS": {
+    "first_long_date": "2026-04-14",
+    "trigger_close": 246000.0,
+    "name": "삼성생명"
+  },
+  "006800.KS": {
+    "first_long_date": "2026-04-14",
+    "trigger_close": 72400.0,
+    "name": "미래에셋증권"
+  },
+  "028050.KS": {
+    "first_long_date": "2026-04-14",
+    "trigger_close": 51800.0,
+    "name": "삼성E&A"
+  },
+  "353200.KS": {
+    "first_long_date": "2026-04-14",
+    "trigger_close": 88500.0,
+    "name": "대덕전자"
+  },
+  "006360.KS": {
+    "first_long_date": "2026-04-14",
+    "trigger_close": 37450.0,
+    "name": "GS건설"
+  },
+  "043260.KQ": {
+    "first_long_date": "2026-04-14",
+    "trigger_close": 53200.0,
+    "name": "성호전자"
+  },
+  "178320.KQ": {
+    "first_long_date": "2026-04-14",
+    "trigger_close": 49950.0,
+    "name": "서진시스템"
+  },
+  "064760.KQ": {
+    "first_long_date": "2026-04-14",
+    "trigger_close": 262000.0,
+    "name": "티씨케이"
+  },
+  "101490.KQ": {
+    "first_long_date": "2026-04-14",
+    "trigger_close": 103100.0,
+    "name": "에스앤에스텍"
+  },
+  "100790.KQ": {
+    "first_long_date": "2026-04-14",
+    "trigger_close": 38900.0,
+    "name": "미래에셋벤처투자"
+  },
+  "082920.KQ": {
+    "first_long_date": "2026-04-14",
+    "trigger_close": 44200.0,
+    "name": "비츠로셀"
   }
 }

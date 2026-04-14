@@ -18,6 +18,12 @@ HYSTERESIS = 3.0                # 등급 경계 완충점수 (±3)
 COOLDOWN_MIN = 30               # 동일 방향 알림 쿨다운 (분)
 GRADE_ORDER = ["안정", "주의", "위험", "고위험"]
 
+# 성과 기록 시트
+PERF_SHEET_NAME = "스카우터_성과자료_v2"
+PERF_FOLDER_ID = os.environ.get("GSHEET_FOLDER_ID", "1oCzJUMAklZwXqBR67CmvzmFdZGg3wLuv")
+PERF_HEADERS = ["날짜", "T-RISK", "FX-RISK", "C-RISK", "VIX점수", "매크로종합",
+                "S&P500 종가", "S&P500 일변동%"]
+
 
 def _load_env():
     if not os.path.exists(ENV_PATH):
@@ -94,7 +100,65 @@ def _save_state(state: dict) -> None:
         print(f"[notifier] state 저장 실패: {e}")
 
 
-def check_and_notify_macro(macro_total: float) -> None:
+def _append_perf_log(scores: dict) -> None:
+    """매크로 알림 발생 시점의 메트릭을 스카우터_성과자료 시트에 누적 기록."""
+    try:
+        import gspread
+        import yfinance as yf
+        from sheet_auth import get_credentials
+        gc = gspread.authorize(get_credentials())
+        from googleapiclient.discovery import build
+        drive = build("drive", "v3", credentials=get_credentials())
+
+        sp500_close = sp500_chg_pct = None
+        try:
+            hist = yf.Ticker("^GSPC").history(period="5d")
+            if len(hist) >= 1:
+                sp500_close = float(hist["Close"].iloc[-1])
+            if len(hist) >= 2:
+                sp500_chg_pct = (sp500_close / float(hist["Close"].iloc[-2]) - 1) * 100
+        except Exception:
+            pass
+
+        q = (f"name='{PERF_SHEET_NAME}' and '{PERF_FOLDER_ID}' in parents "
+             "and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false")
+        res = drive.files().list(q=q, fields="files(id, name)").execute()
+        files = res.get("files", [])
+        if files:
+            sh = gc.open_by_key(files[0]["id"])
+        else:
+            sh = gc.create(PERF_SHEET_NAME, folder_id=PERF_FOLDER_ID)
+        ws = sh.sheet1
+        existing = ws.get_all_values()
+        if not existing or existing[0] != PERF_HEADERS:
+            ws.update(range_name="A1", values=[PERF_HEADERS])
+
+        now = datetime.now()
+        ts_label = now.strftime("%Y-%m-%d %H:%M")
+
+        def _r(v, n=1):
+            try:
+                return round(float(v), n)
+            except Exception:
+                return ""
+
+        row = [
+            ts_label,
+            _r(scores.get("t_risk")),
+            _r(scores.get("fx_risk")),
+            _r(scores.get("c_risk")),
+            _r(scores.get("vix_score")),
+            _r(scores.get("macro_total")),
+            _r(sp500_close, 2),
+            _r(sp500_chg_pct, 2),
+        ]
+        ws.append_row(row)
+        print(f"[notifier] {PERF_SHEET_NAME} 기록 추가: {ts_label}")
+    except Exception as e:
+        print(f"[notifier] 성과자료 기록 실패: {e}")
+
+
+def check_and_notify_macro(macro_total: float, scores: dict | None = None) -> None:
     """market_dashboard.py에서 매크로 스냅샷 저장 직후 호출."""
     if macro_total is None:
         return
@@ -153,6 +217,8 @@ def check_and_notify_macro(macro_total: float) -> None:
             state["last_total"] = macro_total
             state["last_grade"] = new_grade
             _save_state(state)
+            if scores:
+                _append_perf_log(scores)
             return
 
     # 알림 안 보냈어도 상태는 유지 (최초 진입 시 grade만 기록)
