@@ -1242,7 +1242,16 @@ with st.expander(f"금리 — T-Risk {d['t_risk']:.0f}점 · {t_g}"):
         if sp < 0: sp_b = badge_html("위험")
         elif sp < 0.3: sp_b = badge_html("주의")
         else: sp_b = badge_html("안정")
-        rows.append((_tt("Yield Spread (10Y-2Y)", "^TNX − 2YY=F", "계산값", "장단기 금리차 (음수 = 역전)"), f"{sp:+.2f}%p", sp_b))
+        def _num2(v):
+            if v is None or v == "": return None
+            try:
+                m = re.search(r"([+-]?\d+\.?\d*)", str(v))
+                return float(m.group(1)) if m else None
+            except Exception:
+                return None
+        c10 = _num2(d.get("10y_chg")); c2 = _num2(d.get("2y_chg"))
+        sp_chg = (c10 - c2) if (c10 is not None and c2 is not None) else None
+        rows.append((_tt("Yield Spread (10Y-2Y)", "^TNX − 2YY=F", "계산값", "장단기 금리차 (음수 = 역전)"), f"{sp:+.2f}%p{trend_arrow(sp_chg)}", sp_b))
     st.markdown(detail_table(rows), unsafe_allow_html=True)
 
 # ── 환율 세부 ──
@@ -1276,14 +1285,25 @@ with st.expander(f"원자재 — C-Risk {d['c_risk']:.0f}점 · {c_g}"):
             b = badge_html(assess_risk(key, val)[0]) if key else "—"
             rows.append((label, v, b))
     if d["oil_avg"] is not None:
-        rows.append((_tt("Oil Average", "(WTI + Brent) / 2", "계산값", "유가 평균"), f"${d['oil_avg']:.1f}", "—"))
+        _oil_chg_avg = avg_chg(d.get("wti_chg"), d.get("brent_chg"))
+        rows.append((_tt("Oil Average", "(WTI + Brent) / 2", "계산값", "유가 평균"), f"${d['oil_avg']:.1f}{trend_arrow(_oil_chg_avg)}", "—"))
     if d["gc_ratio"] is not None:
         gcr = d["gc_ratio"]
         if gcr < 0.35: gcg = "안정"
         elif gcr <= 0.45: gcg = "주의"
         elif gcr <= 0.55: gcg = "위험"
         else: gcg = "고위험"
-        rows.append((_tt("Gold/Copper Ratio", "Gold ÷ Copper", "계산값", "금/구리 비율 (높을수록 경기 둔화 시그널)"), f"{gcr:.3f}", badge_html(gcg)))
+        # Gold/Copper 비율 변동률 ≈ gold_chg% − copper_chg% (1차 근사)
+        def _num(v):
+            if v is None or v == "": return None
+            try:
+                m = re.search(r"([+-]?\d+\.?\d*)", str(v))
+                return float(m.group(1)) if m else None
+            except Exception:
+                return None
+        g_c = _num(d.get("gold_chg_str")); c_c = _num(d.get("copper_chg"))
+        gcr_chg = (g_c - c_c) if (g_c is not None and c_c is not None) else None
+        rows.append((_tt("Gold/Copper Ratio", "Gold ÷ Copper", "계산값", "금/구리 비율 (높을수록 경기 둔화 시그널)"), f"{gcr:.3f}{trend_arrow(gcr_chg)}", badge_html(gcg)))
     st.markdown(detail_table(rows), unsafe_allow_html=True)
 
 # ── 위험 심리 세부 ──
@@ -1300,7 +1320,7 @@ with st.expander(f"위험 심리 — VIX Score {d['vix_score']:.0f}점 · {v_g}"
     if d["gold"] is not None:
         rows.append((_tt("Gold", "GC=F", "yfinance (15분 지연)", "금 선물"), f"${d['gold']:,.0f}{trend_arrow(d.get('gold_chg_str'))}", d.get("gold_chg_str", "")))
     if d["btc"] is not None:
-        rows.append((_tt("Bitcoin", "BTC-USD", "yfinance", "비트코인 가격"), f"${d['btc']:,.0f}", d.get("btc_chg_str", "")))
+        rows.append((_tt("Bitcoin", "BTC-USD", "yfinance", "비트코인 가격"), f"${d['btc']:,.0f}{trend_arrow(d.get('btc_chg_str'))}", d.get("btc_chg_str", "")))
     st.markdown(detail_table(rows), unsafe_allow_html=True)
 
 # ── 지수 동향 ──
