@@ -202,7 +202,9 @@ def classify_signal(close: pd.Series) -> dict:
         if len(prior_s) >= 10 and prior_s.iloc[0] > 0 and recent_s.iloc[0] > 0:
             ps = (prior_s.iloc[-1] - prior_s.iloc[0]) / prior_s.iloc[0] / len(prior_s)
             rs = (recent_s.iloc[-1] - recent_s.iloc[0]) / recent_s.iloc[0] / len(recent_s)
-            if rs < 0 and abs(rs) > abs(ps) and ps <= 0:
+            rec_cum = (recent_s.iloc[-1] / recent_s.iloc[0] - 1) * 100
+            # 최소 낙폭 -4% 필터 추가 (소폭 눌림 차단)
+            if rs < 0 and rec_cum <= -4 and abs(rs) > abs(ps) and ps <= 0:
                 short_sign = True
 
     # === Short Cover Sign (장기 하락 반전) ===
