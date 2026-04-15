@@ -1031,7 +1031,7 @@ st.markdown(f"""
     .idx-card::before {{
         content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
     }}
-    .idx-card .idx-name {{ font-size: 11px; color: {TEXT_SECONDARY}; letter-spacing: 1px; margin: 0; }}
+    .idx-card .idx-name {{ font-size: 15px; font-weight: 700; color: {TEXT_PRIMARY}; letter-spacing: 0.5px; margin: 0 0 4px 0; }}
     .idx-card .idx-info {{
         display: inline-block; margin-left: 4px; color: {TEXT_SECONDARY};
         opacity: 0.55; cursor: help; font-size: 11px; font-weight: normal;
@@ -1054,7 +1054,7 @@ st.markdown(f"""
         box-shadow: 0 4px 12px rgba(0,0,0,0.4);
     }}
     .tt:hover .tt-box, .tt:focus .tt-box, .tt:active .tt-box {{ display: block; }}
-    .idx-card .idx-val {{ font-size: 28px; font-weight: 700; margin: 6px 0 0 0; font-family: 'Consolas', monospace; }}
+    .idx-card .idx-val {{ font-size: 18px; font-weight: 600; margin: 4px 0 0 0; font-family: 'Consolas', monospace; }}
 
     /* 진단 박스 */
     .diagnosis-box {{
@@ -1184,8 +1184,8 @@ st.markdown(f"""
         }}
         /* 카드 컴팩트화 */
         .idx-card {{ padding: 10px 6px; }}
-        .idx-card .idx-val {{ font-size: 20px; }}
-        .idx-card .idx-name {{ font-size: 10px; letter-spacing: 0.5px; }}
+        .idx-card .idx-val {{ font-size: 14px; }}
+        .idx-card .idx-name {{ font-size: 13px; letter-spacing: 0.3px; }}
         .section-title {{ font-size: 12px; margin: 16px 0 10px 0; letter-spacing: 1px; }}
         .diagnosis-box, .strategy-box {{ padding: 12px 14px; font-size: 13px; }}
         .header-bar h1 {{ font-size: 20px !important; }}
