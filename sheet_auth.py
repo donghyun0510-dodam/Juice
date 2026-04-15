@@ -35,6 +35,8 @@ def get_credentials():
     # 1) 환경변수 OAuth 토큰 (GH Actions 등)
     tok_b64 = os.environ.get("GOOGLE_OAUTH_TOKEN_B64")
     if tok_b64:
+        # 공백·줄바꿈 제거 (secret 복붙 시 줄 접힘 대비)
+        tok_b64 = "".join(tok_b64.split())
         creds = pickle.loads(base64.b64decode(tok_b64))
         return _refresh_and_return(creds)
 
