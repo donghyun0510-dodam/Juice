@@ -1,0 +1,41 @@
+name: Scouter Timeseries & Performance
+on:
+  schedule:
+    # 60분 간격 — 매시 정각 (UTC). notifier 내부 60분 가드로 중복 안전.
+    - cron: "5 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: sheet-writer
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    env:
+      TZ: Asia/Seoul
+      GOOGLE_SA_JSON: ${{ secrets.GOOGLE_SA_JSON }}
+      GSHEET_FOLDER_ID: ${{ secrets.GSHEET_FOLDER_ID }}
+      GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+
+      - name: Log scouter timeseries + performance
+        run: python scouter_logger.py
+
+      - name: Commit-back alert state
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add macro_alert_state.json 2>/dev/null || true
+          if git diff --cached --quiet; then echo "no changes"; exit 0; fi
+          git commit -m "chore: scouter alert state update [skip ci]"
+          for i in 1 2 3 4 5; do
+            git pull --rebase origin main && git push origin main && exit 0
+            echo "push attempt $i failed, retrying…"; sleep 5
+          done
+          exit 1

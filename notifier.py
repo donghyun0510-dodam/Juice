@@ -241,6 +241,25 @@ def log_timeseries_if_due(scores: dict) -> None:
         _save_state(state)
 
 
+def log_perf_if_due(scores: dict) -> None:
+    """60분 간격으로 성과자료 시트에 전수 기록 (이메일 無)."""
+    if not scores:
+        return
+    state = _load_state()
+    last_ts = state.get("last_perf_ts")
+    now = datetime.now()
+    if last_ts:
+        try:
+            elapsed = (now - datetime.fromisoformat(last_ts)).total_seconds() / 60
+            if elapsed < TIMESERIES_INTERVAL_MIN:
+                return
+        except Exception:
+            pass
+    if _append_row_to_sheet(PERF_SHEET_NAME, scores):
+        state["last_perf_ts"] = now.isoformat()
+        _save_state(state)
+
+
 def check_and_notify_macro(macro_total: float, scores: dict | None = None) -> None:
     """market_dashboard.py에서 매크로 스냅샷 저장 직후 호출."""
     if macro_total is None:
@@ -300,8 +319,6 @@ def check_and_notify_macro(macro_total: float, scores: dict | None = None) -> No
             state["last_total"] = macro_total
             state["last_grade"] = new_grade
             _save_state(state)
-            if scores:
-                _append_perf_log(scores)
             return
 
     # 알림 안 보냈어도 상태는 유지 (최초 진입 시 grade만 기록)

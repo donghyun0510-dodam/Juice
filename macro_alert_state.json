@@ -1,5 +1,7 @@
 {
-  "last_grade": "안정",
-  "last_total": 23.763874624835417,
-  "last_timeseries_ts": "2026-04-14T23:53:02.979057"
+  "last_grade": "주의",
+  "last_total": 29.11032864117997,
+  "last_timeseries_ts": "2026-04-15T09:02:18.527387",
+  "last_alert_ts": "2026-04-14T16:00:09.868642",
+  "last_perf_ts": "2026-04-15T09:09:13.184343"
 }
