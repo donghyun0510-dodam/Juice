@@ -1761,7 +1761,7 @@ SIGNAL_CHANGES = detect_changes(sig, BASELINE_SIGNALS)  # {ticker: (before, afte
 # 장중 변화 요약 섹션 (개별 주식 1 체크포인트 위에 노출)
 if SIGNAL_CHANGES:
     st.markdown('<p class="section-title">🔔 장중 신호 변화</p>', unsafe_allow_html=True)
-    with st.expander(f"아침 리뷰 대비 신호 변화 — {len(SIGNAL_CHANGES)}개 종목", expanded=True):
+    with st.expander(f"아침 리뷰 대비 신호 변화 — {len(SIGNAL_CHANGES)}개 종목", expanded=False):
         for t, (before, after) in SIGNAL_CHANGES.items():
             name = TICKER_NAMES.get(t, t)
             before_kr = SIGNAL_LABEL_KR.get(before, before)
