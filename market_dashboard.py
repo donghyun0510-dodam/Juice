@@ -1541,25 +1541,55 @@ if _promoted_kr:
             STOCK_UNIVERSE["🇰🇷 신규 편입"].append(_t)
         TICKER_NAMES.setdefault(_t, _info.get("name", _t))
 
+def _is_kr_ticker(t: str) -> bool:
+    return t.endswith(".KS") or t.endswith(".KQ")
+
+
+@st.cache_data(ttl=600)
+def _fetch_kr_daily(ticker: str):
+    """한국 종목 일봉 (Naver 경유 FDR). ticker="005930.KS" → code="005930"."""
+    try:
+        import FinanceDataReader as fdr
+        import pandas as pd
+        from datetime import datetime as _dt, timedelta as _td
+        code = ticker.split(".")[0]
+        start = (_dt.now() - _td(days=400)).strftime("%Y-%m-%d")
+        df = fdr.DataReader(code, start=start)
+        if df is None or len(df) == 0:
+            return None
+        return df
+    except Exception as e:
+        print(f"[FDR] {ticker} fail: {e}", flush=True)
+        return None
+
+
 @st.cache_data(ttl=300)
 def analyze_trend_signals(all_tickers, with_live=True):
     """종목별 추세 신호 분석 (daily bar, 선택적 장중 라이브 가격 합성, 5분 캐시).
+    한국(.KS/.KQ)은 FinanceDataReader(Naver), 그 외는 yfinance 사용.
     with_live=False 시 라이브 1분봉 다운로드 스킵 (대규모 스캔용).
     """
-    try:
-        data = yf.download(all_tickers, period="1y", auto_adjust=True, progress=False, group_by="ticker")
-    except Exception:
-        return {}
+    kr_tickers = [t for t in all_tickers if _is_kr_ticker(t)]
+    us_tickers = [t for t in all_tickers if not _is_kr_ticker(t)]
 
-    # 장중 라이브 가격 일괄 수집 (추적 종목 전용)
-    live_prices = {}
-    if with_live:
+    kr_data = {t: _fetch_kr_daily(t) for t in kr_tickers}
+
+    us_data = None
+    if us_tickers:
         try:
-            live_data = yf.download(all_tickers, period="1d", interval="1m",
+            us_data = yf.download(us_tickers, period="1y", auto_adjust=True, progress=False, group_by="ticker")
+        except Exception:
+            us_data = None
+
+    # 장중 라이브 가격 (US만 — KR은 Naver 일봉 기반)
+    live_prices = {}
+    if with_live and us_tickers:
+        try:
+            live_data = yf.download(us_tickers, period="1d", interval="1m",
                                     progress=False, group_by="ticker", prepost=True)
-            for t in all_tickers:
+            for t in us_tickers:
                 try:
-                    if len(all_tickers) == 1:
+                    if len(us_tickers) == 1:
                         c = live_data["Close"].dropna()
                     else:
                         c = live_data[t]["Close"].dropna()
@@ -1570,14 +1600,26 @@ def analyze_trend_signals(all_tickers, with_live=True):
         except Exception:
             pass
 
+    def _close_for(t):
+        if _is_kr_ticker(t):
+            df = kr_data.get(t)
+            if df is None:
+                return None
+            return df["Close"].dropna()
+        if us_data is None:
+            return None
+        try:
+            if len(us_tickers) == 1:
+                return us_data["Close"].dropna()
+            return us_data[t]["Close"].dropna()
+        except Exception:
+            return None
+
     results = {}
     for t in all_tickers:
         try:
-            if len(all_tickers) == 1:
-                close = data["Close"].dropna()
-            else:
-                close = data[t]["Close"].dropna()
-            if len(close) < 200:
+            close = _close_for(t)
+            if close is None or len(close) < 200:
                 continue
             # 마지막 일봉을 장중 라이브 가격으로 교체 (오늘 종가 대용)
             live = live_prices.get(t)
@@ -1945,9 +1987,8 @@ def scan_kr_long_signs(exclude_set):
 
 exclude_set = set(all_tk)
 
-# 미국 S&P 500
-with st.spinner("S&P 500 신규 Long Sign 스캔 중 (최초 1회 수십 초 소요)..."):
-    us_longs, sector_map, us_err = scan_sp500_long_signs(exclude_set)
+# 미국 S&P 500 신규 스캔 제거 — 추적 종목만 활용 (Yahoo rate-limit 회피)
+us_longs, sector_map, us_err = {}, {}, None
 
 # 한국 (KOSPI + KOSDAQ, 시총 2조원+)
 with st.spinner("한국 신규 Long Sign 스캔 중 (KOSPI+KOSDAQ, 시총 2조원+ 필터)..."):
@@ -2105,52 +2146,6 @@ def _render_last_diff_banner():
         '</div>',
         unsafe_allow_html=True,
     )
-
-# ── 미국 ──
-if us_err:
-    st.warning(f"S&P 500 스캔 실패: {us_err}")
-else:
-    mcap_min = 50e9  # $50B+
-    mcap_label = "$50B+"
-
-    with st.spinner(f"시가총액 조회 중..."):
-        caps = get_market_caps(list(us_longs.keys()))
-
-    us_longs_filtered = {t: info for t, info in us_longs.items()
-                         if caps.get(t, 0) >= mcap_min}
-    # 시총 정보 주입
-    for t, info in us_longs_filtered.items():
-        info["mcap"] = caps.get(t, 0)
-
-    by_sector = {}
-    for t, info in us_longs_filtered.items():
-        sec = sector_map.get(t, "Others")
-        by_sector.setdefault(sec, []).append((t, info))
-
-    with st.expander(f"🇺🇸 S&P 500 신규 Long Sign ({len(us_longs_filtered)}개 / 전체 {len(us_longs)}개)", expanded=False):
-            if us_longs_filtered:
-                for sec in sorted(by_sector.keys()):
-                    hits = sorted(by_sector[sec], key=lambda x: -x[1].get("mcap", 0))
-                    st.markdown(f"**{sec}** ({len(hits)}개)")
-                    for t, i in hits:
-                        mc = i.get("mcap", 0) / 1e9
-                        mc_str = f"${mc:,.0f}B" if mc >= 1 else ""
-                        name = TICKER_NAMES.get(t, t)
-                        arrow = "▲" if i["chg"] >= 0 else "▼"
-                        color = COLOR_SAFE if i["chg"] >= 0 else COLOR_CRISIS
-                        new_badge = NEW_BADGE_HTML if t in NEW_LONG_TICKERS else ""
-                        st.markdown(
-                            f'<div style="display:flex;justify-content:space-between;padding:4px 8px;border-bottom:1px solid #2a2a2a;">'
-                            f'<span><strong>{name}</strong> <span style="color:#888;font-size:0.85em;">{t}</span> '
-                            f'<span style="color:#aaa;font-size:0.8em;">· {mc_str}</span>{new_badge}</span>'
-                            f'<span style="color:{color};">{arrow} {i["chg"]:+.2f}% &nbsp; ${i["last"]:,.2f}</span>'
-                            f'</div>',
-                            unsafe_allow_html=True,
-                        )
-                    st.markdown("")
-                st.caption("※ 시가총액 $50B(약 70조원) 이상 종목만 표시")
-            else:
-                st.markdown("_해당 시총 구간에 신규 Long sign 발생 종목 없음_")
 
 # ── 한국 ──
 if kr_err:
