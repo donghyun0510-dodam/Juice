@@ -1861,7 +1861,7 @@ def get_market_caps(tickers):
             continue
     return caps
 
-@st.cache_data(ttl=300)  # 5분 캐시 (당일 상쇄된 long sign 신속 반영)
+@st.cache_data(ttl=3600)  # 1시간 캐시 (Cloud 메모리 보호를 위해 빈도 축소)
 def scan_sp500_long_signs(exclude_set):
     """S&P500 중 추적 종목 외에서 Long sign 발생 종목 스캔"""
     try:
@@ -1881,7 +1881,7 @@ def scan_sp500_long_signs(exclude_set):
     long_only = {t: info for t, info in sig_new.items() if info["tag"] == "long"}
     return long_only, sector_map, None
 
-@st.cache_data(ttl=300)  # 5분 캐시 (당일 상쇄된 long sign 신속 반영)
+@st.cache_data(ttl=3600)  # 1시간 캐시 (Cloud 메모리 보호를 위해 빈도 축소)
 def scan_kr_long_signs(exclude_set):
     """KOSPI + KOSDAQ 중 시총 2조원 이상, 추적 외에서 Long sign 발생 종목 스캔.
     네이버 금융 시총 순위 페이지에서 2조원 이상 종목 수집 (ETF/ETN 제외)."""
