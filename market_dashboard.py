@@ -1915,9 +1915,10 @@ def get_market_caps(tickers):
             continue
     return caps
 
-@st.cache_data(ttl=3600)  # 1시간 캐시 (Cloud 메모리 보호를 위해 빈도 축소)
-def scan_sp500_long_signs(exclude_set):
-    """S&P500 중 추적 종목 외에서 Long sign 발생 종목 스캔"""
+@st.cache_data(ttl=3600)
+def _scan_sp500_long_signs_raw(exclude_set):
+    """S&P500 중 추적 종목 외에서 Long sign 발생 종목 스캔 (내부, 무거움).
+    상위 scan_sp500_long_signs 에서 장종료 후 1회만 호출되도록 게이팅."""
     try:
         import pandas as pd
         from io import StringIO
@@ -1934,6 +1935,57 @@ def scan_sp500_long_signs(exclude_set):
     sig_new = analyze_trend_signals(candidates, with_live=False)
     long_only = {t: info for t, info in sig_new.items() if info["tag"] == "long"}
     return long_only, sector_map, None
+
+
+US_LONG_SCAN_CACHE = "us_long_scan_daily.json"
+
+def _load_us_scan_cache():
+    try:
+        import json, os
+        if not os.path.exists(US_LONG_SCAN_CACHE):
+            return None
+        with open(US_LONG_SCAN_CACHE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+def _save_us_scan_cache(payload):
+    try:
+        import json
+        with open(US_LONG_SCAN_CACHE, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False)
+    except Exception:
+        pass
+
+
+def scan_sp500_long_signs(exclude_set):
+    """장종료(미국 기준 16:00 ET 이후) 후 하루 1회만 실제 스캔. 그 외엔 디스크 캐시 반환."""
+    from datetime import datetime
+    try:
+        import pytz
+        now_et = datetime.now(pytz.timezone("America/New_York"))
+    except Exception:
+        now_et = datetime.now()
+    today_str = now_et.strftime("%Y-%m-%d")
+    post_close = now_et.hour >= 16  # 16:00 ET 이후
+    cache = _load_us_scan_cache()
+
+    if cache and cache.get("date") == today_str:
+        long_only = cache.get("long_only", {})
+        sector_map = cache.get("sector_map", {})
+        return long_only, sector_map, None
+
+    if post_close:
+        long_only, sector_map, err = _scan_sp500_long_signs_raw(exclude_set)
+        if err is None:
+            _save_us_scan_cache({"date": today_str, "long_only": long_only, "sector_map": sector_map})
+        return long_only, sector_map, err
+
+    # 장중/프리마켓: 전일 캐시 반환
+    if cache:
+        return cache.get("long_only", {}), cache.get("sector_map", {}), None
+    return {}, {}, None
+
 
 KR_LONG_SCAN_CACHE = "kr_long_scan_daily.json"
 
@@ -2051,8 +2103,9 @@ def scan_kr_long_signs(exclude_set):
 
 exclude_set = set(all_tk)
 
-# 미국 S&P 500 신규 스캔 제거 — 추적 종목만 활용 (Yahoo rate-limit 회피)
-us_longs, sector_map, us_err = {}, {}, None
+# 미국 S&P 500 — 미국장 마감(16:00 ET) 후 1회만 스캔
+with st.spinner("미국 신규 Long Sign 조회 중 (장종료 후 1회 스캔)..."):
+    us_longs, sector_map, us_err = scan_sp500_long_signs(exclude_set)
 
 # 한국 (KOSPI + KOSDAQ, 시총 3조원+) — 장종료(16:00 KST) 후 1회만 스캔
 with st.spinner("한국 신규 Long Sign 조회 중 (장종료 후 1회 스캔)..."):
