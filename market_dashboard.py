@@ -1572,9 +1572,9 @@ def _fetch_kr_daily(ticker: str):
         return None
 
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=600)
 def analyze_trend_signals(all_tickers, with_live=True):
-    """종목별 추세 신호 분석 (daily bar, 선택적 장중 라이브 가격 합성, 5분 캐시).
+    """종목별 추세 신호 분석 (daily bar, 선택적 장중 라이브 가격 합성, 10분 캐시).
     한국(.KS/.KQ)은 FinanceDataReader(Naver), 그 외는 yfinance 사용.
     with_live=False 시 라이브 1분봉 다운로드 스킵 (대규모 스캔용).
     """
