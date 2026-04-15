@@ -19,6 +19,24 @@ import requests
 import yfinance as yf
 import pandas as pd
 
+# yfinance에 curl_cffi 세션 주입 — Yahoo rate limit 우회 (dashboard와 동일 기법)
+try:
+    from curl_cffi import requests as cffi_req
+    _CFFI_SESSION = cffi_req.Session(impersonate="chrome")
+    try:
+        _CFFI_SESSION.get("https://kr.investing.com/", timeout=15)  # warmup
+    except Exception:
+        pass
+    _ORIG_YF_TICKER = yf.Ticker
+    def _yf_ticker_patched(symbol, *args, **kwargs):
+        if "session" not in kwargs:
+            kwargs["session"] = _CFFI_SESSION
+        return _ORIG_YF_TICKER(symbol, *args, **kwargs)
+    yf.Ticker = _yf_ticker_patched
+    print("[scouter_logger] curl_cffi session 주입 완료", flush=True)
+except Exception as e:
+    print(f"[scouter_logger] curl_cffi 주입 실패 (fallback to plain yfinance): {e}", flush=True)
+
 CNBC_YIELD_SYM = {"2Y": "US2Y", "10Y": "US10Y", "30Y": "US30Y"}
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
