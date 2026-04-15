@@ -22,6 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       TZ: Asia/Seoul
+      GOOGLE_OAUTH_TOKEN_B64: ${{ secrets.GOOGLE_OAUTH_TOKEN_B64 }}
       GOOGLE_SA_JSON: ${{ secrets.GOOGLE_SA_JSON }}
       GSHEET_FOLDER_ID: ${{ secrets.GSHEET_FOLDER_ID }}
       GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
