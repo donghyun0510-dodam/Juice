@@ -223,42 +223,37 @@ def _append_perf_log(scores: dict) -> None:
     _append_row_to_sheet(PERF_SHEET_NAME, scores)
 
 
-def log_timeseries_if_due(scores: dict) -> None:
-    """60분 간격으로 타임시리즈 시트에 전수 기록."""
+def _log_if_due(scores: dict, sheet_name: str, state_key: str) -> None:
     if not scores:
+        print(f"[notifier] {sheet_name}: scores 비어있음 — 스킵", flush=True)
         return
     state = _load_state()
-    last_ts = state.get("last_timeseries_ts")
+    last_ts = state.get(state_key)
     now = datetime.now()
     if last_ts:
         try:
             elapsed = (now - datetime.fromisoformat(last_ts)).total_seconds() / 60
             if elapsed < TIMESERIES_INTERVAL_MIN:
+                print(f"[notifier] {sheet_name}: 60분 가드 ({elapsed:.1f}분 경과) — 스킵", flush=True)
                 return
-        except Exception:
-            pass
-    if _append_row_to_sheet(TIMESERIES_SHEET_NAME, scores):
-        state["last_timeseries_ts"] = now.isoformat()
+            print(f"[notifier] {sheet_name}: 가드 통과 ({elapsed:.1f}분 경과) — append 시도", flush=True)
+        except Exception as e:
+            print(f"[notifier] {sheet_name}: last_ts 파싱 실패 {e} — 그냥 append 시도", flush=True)
+    else:
+        print(f"[notifier] {sheet_name}: 최초 기록 — append 시도", flush=True)
+    if _append_row_to_sheet(sheet_name, scores):
+        state[state_key] = now.isoformat()
         _save_state(state)
+
+
+def log_timeseries_if_due(scores: dict) -> None:
+    """60분 간격으로 타임시리즈 시트에 전수 기록."""
+    _log_if_due(scores, TIMESERIES_SHEET_NAME, "last_timeseries_ts")
 
 
 def log_perf_if_due(scores: dict) -> None:
     """60분 간격으로 성과자료 시트에 전수 기록 (이메일 無)."""
-    if not scores:
-        return
-    state = _load_state()
-    last_ts = state.get("last_perf_ts")
-    now = datetime.now()
-    if last_ts:
-        try:
-            elapsed = (now - datetime.fromisoformat(last_ts)).total_seconds() / 60
-            if elapsed < TIMESERIES_INTERVAL_MIN:
-                return
-        except Exception:
-            pass
-    if _append_row_to_sheet(PERF_SHEET_NAME, scores):
-        state["last_perf_ts"] = now.isoformat()
-        _save_state(state)
+    _log_if_due(scores, PERF_SHEET_NAME, "last_perf_ts")
 
 
 def check_and_notify_macro(macro_total: float, scores: dict | None = None) -> None:
