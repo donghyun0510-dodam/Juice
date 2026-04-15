@@ -1928,6 +1928,11 @@ def main():
             })
         if kr_fmt_list:
             ws_korea.batch_format(kr_fmt_list)
+        # F열(티커)은 대시보드 source-of-truth로만 사용 — 시트 보기에서는 숨김
+        try:
+            ws_korea.hide_columns(5, 6)
+        except Exception as _e:
+            print(f"  (F열 숨기기 실패, 무시: {_e})")
         print("  국장 시트 작성 완료")
 
     # 성과 추적 시트 기록은 market_dashboard.py의 매크로 알림 트리거에서 수행
