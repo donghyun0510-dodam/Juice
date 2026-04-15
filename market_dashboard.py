@@ -1278,11 +1278,25 @@ def _delta_html(delta):
     sign = "+" if delta > 0 else ""
     return f' <span style="color:{color};font-size:0.6em;font-weight:normal;">({sign}{delta:.0f})</span>'
 
+def _risk_gradient(th):
+    t1, t2, t3 = th
+    return (
+        f"linear-gradient(to right,"
+        f"{COLOR_SAFE} 0%,{COLOR_SAFE} {t1}%,"
+        f"{COLOR_CAUTION} {t1}%,{COLOR_CAUTION} {t2}%,"
+        f"{COLOR_DANGER} {t2}%,{COLOR_DANGER} {t3}%,"
+        f"{COLOR_CRISIS} {t3}%,{COLOR_CRISIS} 100%)"
+    )
+
+
 cols = st.columns(4)
 for col, (code, label, score, max_score, th, delta) in zip(cols, sub_indices):
     g = risk_grade(score, th)
     sc = grade_css_color(g)
     pct = min(score / max_score * 100, 100)
+    # 그라데이션을 max 구간(0~100)으로 펼친 뒤 fill 너비(pct)에 비례해 잘라 보이게 함
+    bar_bg_size = f"{(100/pct*100):.1f}% 100%" if pct > 0 else "100% 100%"
+    bar_grad = _risk_gradient(th)
     with col:
         st.markdown(
             f"""
@@ -1291,7 +1305,7 @@ for col, (code, label, score, max_score, th, delta) in zip(cols, sub_indices):
                 <p class="sc-label">{code}</p>
                 <p class="sc-score" style="color:{sc};">{score:.0f}{_delta_html(delta)}</p>
                 <p class="sc-grade" style="color:{sc};">{label} · {g}</p>
-                <div class="sc-bar"><div class="sc-bar-fill" style="width:{pct:.0f}%;background:{sc};"></div></div>
+                <div class="sc-bar"><div class="sc-bar-fill" style="width:{pct:.0f}%;background:{bar_grad};background-size:{bar_bg_size};background-position:0 0;"></div></div>
             </div>
             """,
             unsafe_allow_html=True,
