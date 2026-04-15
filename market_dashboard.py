@@ -994,9 +994,9 @@ st.markdown(f"""
     .sub-card::before {{
         content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
     }}
-    .sub-card .sc-label {{ font-size: 11px; color: {TEXT_SECONDARY}; letter-spacing: 1.5px; text-transform: uppercase; margin: 0 0 8px 0; }}
-    .sub-card .sc-score {{ font-size: 36px; font-weight: 700; margin: 0; line-height: 1.1; }}
-    .sub-card .sc-grade {{ font-size: 13px; font-weight: 500; margin-top: 6px; letter-spacing: 1px; }}
+    .sub-card .sc-label {{ font-size: 17px; color: {TEXT_PRIMARY}; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; margin: 0 0 6px 0; }}
+    .sub-card .sc-score {{ font-size: 24px; font-weight: 600; margin: 0; line-height: 1.1; }}
+    .sub-card .sc-grade {{ font-size: 12px; font-weight: 500; margin-top: 4px; letter-spacing: 0.5px; }}
     .sub-card .sc-bar {{ height: 3px; border-radius: 2px; background: #21262d; margin-top: 12px; overflow: hidden; }}
     .sub-card .sc-bar-fill {{ height: 100%; border-radius: 2px; }}
 
