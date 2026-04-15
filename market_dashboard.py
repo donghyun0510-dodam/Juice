@@ -706,7 +706,10 @@ def collect_all_data():
     }
     if US_CASH_OPEN:
         for key, tkr in idx_map_cash.items():
-            data[f"{key}_chg_str"], data[f"{key}_chg"] = get_change_pct(tkr)
+            price_str, chg_str, _ = get_price_and_change(tkr)
+            data[f"{key}_price_str"] = price_str
+            data[f"{key}_chg_str"] = chg_str
+            data[f"{key}_chg"] = chg_num(chg_str)
     else:
         with ThreadPoolExecutor(max_workers=4) as ex:
             futs = {
@@ -714,14 +717,23 @@ def collect_all_data():
                 for key, (url, sym) in idx_map_fut.items()
             }
         for key, f in futs.items():
-            _, pct_str, _, pct_val = f.result()
-            data[f"{key}_chg_str"], data[f"{key}_chg"] = pct_str, pct_val
+            price_str, pct_str, _, pct_val = f.result()
+            data[f"{key}_price_str"] = price_str
+            data[f"{key}_chg_str"] = pct_str
+            data[f"{key}_chg"] = pct_val
     data["indices_is_futures"] = not US_CASH_OPEN
     # Micro E-mini 나스닥 선물 (Yahoo 페이지 직접 스크랩)
-    _, data["nq_chg_str"], _, data["nq_chg"] = scrape_yahoo_quote(
+    _nq_price, _nq_pct_str, _, _nq_pct = scrape_yahoo_quote(
         "https://finance.yahoo.com/quote/MNQ=F/", symbol="MNQ=F"
     )
-    data["kospi_night_chg_str"], data["kospi_night_chg"] = get_change_pct("EWY")  # iShares MSCI Korea ETF (미국 시간대 한국 익스포저 대리)
+    data["nq_price_str"] = _nq_price
+    data["nq_chg_str"] = _nq_pct_str
+    data["nq_chg"] = _nq_pct
+    # iShares MSCI Korea ETF (미국 시간대 한국 익스포저 대리)
+    _kn_price, _kn_chg_str, _ = get_price_and_change("EWY")
+    data["kospi_night_price_str"] = _kn_price
+    data["kospi_night_chg_str"] = _kn_chg_str
+    data["kospi_night_chg"] = chg_num(_kn_chg_str)
 
     # 종합 점수 계산
     t_raw, data["t_risk"], data["spread"] = compute_t_risk(data["2y"], data["10y"], data["30y"])
@@ -1398,15 +1410,15 @@ _idx_src = {
     "russell": ("^RUT", "Russell 2000 현물", "yfinance")                     if not _fut else ("RTY=F", "E-mini Russell 2000 선물 (CME)", "yfinance"),
 }
 indices = [
-    (f"DOW JONES{_fut_sfx}",    d["dow_chg_str"],     d["dow_chg"],     _idx_src["dow"]),
-    (f"NASDAQ{_fut_sfx}",       d["nasdaq_chg_str"],  d["nasdaq_chg"],  _idx_src["nasdaq"]),
-    (f"S&P 500{_fut_sfx}",      d["sp500_chg_str"],   d["sp500_chg"],   _idx_src["sp500"]),
-    (f"RUSSELL 2000{_fut_sfx}", d["russell_chg_str"], d["russell_chg"], _idx_src["russell"]),
-    ("MICRO NASDAQ",            d["nq_chg_str"],      d["nq_chg"],      ("MNQ=F", "Micro E-mini NASDAQ-100 선물 (CME)", "Yahoo Finance 페이지")),
-    ("EWY (한국 ETF)",           d["kospi_night_chg_str"], d["kospi_night_chg"], ("EWY", "iShares MSCI South Korea ETF (미국 상장, KOSPI 대리변수)", "yfinance")),
+    (f"DOW JONES{_fut_sfx}",    d.get("dow_price_str", ""),     d["dow_chg_str"],     d["dow_chg"],     _idx_src["dow"]),
+    (f"NASDAQ{_fut_sfx}",       d.get("nasdaq_price_str", ""),  d["nasdaq_chg_str"],  d["nasdaq_chg"],  _idx_src["nasdaq"]),
+    (f"S&P 500{_fut_sfx}",      d.get("sp500_price_str", ""),   d["sp500_chg_str"],   d["sp500_chg"],   _idx_src["sp500"]),
+    (f"RUSSELL 2000{_fut_sfx}", d.get("russell_price_str", ""), d["russell_chg_str"], d["russell_chg"], _idx_src["russell"]),
+    ("MICRO NASDAQ",            d.get("nq_price_str", ""),      d["nq_chg_str"],      d["nq_chg"],      ("MNQ=F", "Micro E-mini NASDAQ-100 선물 (CME)", "Yahoo Finance 페이지")),
+    ("EWY (한국 ETF)",           d.get("kospi_night_price_str", ""), d["kospi_night_chg_str"], d["kospi_night_chg"], ("EWY", "iShares MSCI South Korea ETF (미국 상장, KOSPI 대리변수)", "yfinance")),
 ]
 idx_cols = st.columns(len(indices)) if indices else []
-for col, (name, chg_str, chg_val, src) in zip(idx_cols, indices):
+for col, (name, price_str, chg_str, chg_val, src) in zip(idx_cols, indices):
     with col:
         if chg_val is None:
             tkr, desc, source = src
@@ -1425,14 +1437,14 @@ for col, (name, chg_str, chg_val, src) in zip(idx_cols, indices):
             elif chg_val <= -2: ic = COLOR_CRISIS
             elif chg_val >= 0: ic = COLOR_SAFE
             else: ic = COLOR_CRISIS
-            arrow = "▲" if chg_val >= 0 else "▼"
             tkr, desc, source = src
             tooltip_text = f"티커: {tkr}<br>출처: {source}<br>{desc}"
+            display = f"{price_str} ({chg_str})" if price_str else chg_str
             st.markdown(
                 f"""<div class="idx-card" style="border-color:{ic}40;">
                     <div style="position:absolute;top:0;left:0;right:0;height:2px;background:{ic};"></div>
                     <p class="idx-name">{name} <span class="tt" tabindex="0">ⓘ<span class="tt-box">{tooltip_text}</span></span></p>
-                    <p class="idx-val" style="color:{ic};">{arrow} {chg_str}</p>
+                    <p class="idx-val" style="color:{ic};">{display}</p>
                 </div>""",
                 unsafe_allow_html=True,
             )
