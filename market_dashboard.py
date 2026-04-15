@@ -5,6 +5,15 @@
 """
 
 import os as _os
+
+# 컨테이너 타임존 강제 KST — Streamlit/Tornado 로그 타임스탬프까지 반영
+_os.environ["TZ"] = "Asia/Seoul"
+try:
+    import time as _time
+    _time.tzset()
+except Exception:
+    pass
+
 import streamlit as st
 
 # Streamlit Cloud Secrets → 환경변수 브릿지 (notifier/sheet_auth는 os.environ을 읽음)
