@@ -974,6 +974,7 @@ st.markdown(f"""
     .header-bar .ts {{
         font-size: 12px; color: {TEXT_SECONDARY};
         font-family: 'Consolas', monospace;
+        text-align: right; line-height: 1.5;
     }}
 
     /* 종합 게이지 */
@@ -1235,8 +1236,8 @@ def detail_table(rows):
 # 헤더
 st.markdown(
     f"""<div class="header-bar">
-        <h1>주식 스카우터</h1>
-        <span class="ts">{_kst_now().strftime('%Y-%m-%d %H:%M:%S')} KST &nbsp;|&nbsp; {"🟢 10분 자동 갱신" if MARKET_OPEN else "⏸ 휴장 중 (수동 새로고침)"} &nbsp;|&nbsp; Yahoo Finance &middot; Investing.com</span>
+        <h1>JUICE 주식 스카우터</h1>
+        <span class="ts">{_kst_now().strftime('%Y-%m-%d %H:%M:%S')} KST<br>{"🟢 10분 자동 갱신" if MARKET_OPEN else "⏸ 휴장 중 (수동 새로고침)"}<br>Yahoo Finance &middot; Investing.com</span>
     </div>""",
     unsafe_allow_html=True,
 )
