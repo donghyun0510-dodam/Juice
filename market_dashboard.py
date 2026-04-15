@@ -2178,7 +2178,7 @@ NEW_BADGE_HTML = (
 )
 
 # 섹션 타이틀 (직전 변화 배너는 한국 신규 Long Sign 아래에 표시)
-st.markdown('<p class="section-title">개별 주식 2 — 신규 Long Sign (특징주)</p>', unsafe_allow_html=True)
+st.markdown('<p class="section-title">개별 주식 2 — 신규 Long Sign (특징주) <span style="font-size:0.7em; color:#888; font-weight:normal;">· 장 마감 후 리뉴얼</span></p>', unsafe_allow_html=True)
 
 def _render_last_diff_banner():
     if not (LAST_DIFF.get("added") or LAST_DIFF.get("removed")):
