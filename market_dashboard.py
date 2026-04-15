@@ -1932,10 +1932,30 @@ def scan_sp500_long_signs(exclude_set):
     long_only = {t: info for t, info in sig_new.items() if info["tag"] == "long"}
     return long_only, sector_map, None
 
-@st.cache_data(ttl=3600)  # 1시간 캐시 (Cloud 메모리 보호를 위해 빈도 축소)
-def scan_kr_long_signs(exclude_set):
-    """KOSPI + KOSDAQ 중 시총 3조원 이상, 추적 외에서 Long sign 발생 종목 스캔.
-    네이버 금융 시총 순위 페이지에서 3조원 이상 종목 수집 (ETF/ETN 제외)."""
+KR_LONG_SCAN_CACHE = "kr_long_scan_daily.json"
+
+def _load_kr_scan_cache():
+    try:
+        import json, os
+        if not os.path.exists(KR_LONG_SCAN_CACHE):
+            return None
+        with open(KR_LONG_SCAN_CACHE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+def _save_kr_scan_cache(payload):
+    try:
+        import json
+        with open(KR_LONG_SCAN_CACHE, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False)
+    except Exception:
+        pass
+
+@st.cache_data(ttl=3600)
+def _scan_kr_long_signs_raw(exclude_set):
+    """실제 스캔 수행 (내부 함수). 호출 시마다 네이버 크롤링 + 신호 분석.
+    장종료 후 1회만 호출되도록 상위 scan_kr_long_signs 에서 게이팅."""
     from bs4 import BeautifulSoup
     candidates = []
     name_map = {}
@@ -1994,13 +2014,45 @@ def scan_kr_long_signs(exclude_set):
     name_out = {t: name_map.get(t, t) for t in long_only}
     return long_only, name_out, None
 
+
+def scan_kr_long_signs(exclude_set):
+    """장종료 후(16:00 KST 이후) 하루 1회만 실제 스캔. 그 외엔 디스크 캐시 반환.
+    - 오늘 날짜 캐시(post-close 생성) 있으면: 그대로 사용
+    - 없고 현재 KST 16:00 이후: 스캔 실행 후 저장
+    - 16:00 이전: 전일 캐시 있으면 반환, 없으면 빈 결과
+    """
+    from datetime import datetime
+    try:
+        import pytz
+        now_kst = datetime.now(pytz.timezone("Asia/Seoul"))
+    except Exception:
+        now_kst = datetime.now()
+    today_str = now_kst.strftime("%Y-%m-%d")
+    post_close = now_kst.hour >= 16
+    cache = _load_kr_scan_cache()
+
+    if cache and cache.get("date") == today_str:
+        return cache.get("long_only", {}), cache.get("name_map", {}), None
+
+    if post_close:
+        long_only, name_map, err = _scan_kr_long_signs_raw(exclude_set)
+        if err is None:
+            _save_kr_scan_cache({"date": today_str, "long_only": long_only, "name_map": name_map})
+        return long_only, name_map, err
+
+    # 장중: 전일 캐시 반환 (있으면)
+    if cache:
+        return cache.get("long_only", {}), cache.get("name_map", {}), None
+    return {}, {}, None
+
+
 exclude_set = set(all_tk)
 
 # 미국 S&P 500 신규 스캔 제거 — 추적 종목만 활용 (Yahoo rate-limit 회피)
 us_longs, sector_map, us_err = {}, {}, None
 
-# 한국 (KOSPI + KOSDAQ, 시총 3조원+)
-with st.spinner("한국 신규 Long Sign 스캔 중 (KOSPI+KOSDAQ, 시총 3조원+ 필터)..."):
+# 한국 (KOSPI + KOSDAQ, 시총 3조원+) — 장종료(16:00 KST) 후 1회만 스캔
+with st.spinner("한국 신규 Long Sign 조회 중 (장종료 후 1회 스캔)..."):
     kr_longs, kr_name_map, kr_err = scan_kr_long_signs(exclude_set)
 
 # 한글명 임시 병합 (_fmt_row 에서 조회)
