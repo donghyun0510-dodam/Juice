@@ -617,10 +617,10 @@ def build_global_sheet(target_date):
     # 섹터/종목 - 미국 개별종목 등락률
     us_stocks = {
         # 반도체
-        "SOX": "^SOX", "INTC": "INTC", "AMD": "AMD", "ARM": "ARM",
+        "^SOX": "^SOX", "INTC": "INTC", "AMD": "AMD", "ARM": "ARM",
         "AMAT": "AMAT", "ASML": "ASML", "LRCX": "LRCX", "MU": "MU",
         "TXN": "TXN", "NVDA": "NVDA", "AVGO": "AVGO", "MRVL": "MRVL",
-        "COHR": "COHR", "SNDK": "SNDK",
+        "COHR": "COHR", "SNDK": "SNDK", "ASE": "ASE", "STX": "STX",
         # 하드웨어
         "DELL": "DELL", "ANET": "ANET", "CSCO": "CSCO",
         # 빅테크
@@ -629,16 +629,16 @@ def build_global_sheet(target_date):
         # 소프트웨어
         "IBM": "IBM", "ADBE": "ADBE", "CRM": "CRM", "DDOG": "DDOG",
         "CRWD": "CRWD", "SNOW": "SNOW", "PLTR": "PLTR", "NOW": "NOW",
-        "SAP": "SAP", "ISRG": "ISRG", "RDNT": "RDNT", "TEM": "TEM",
+        "SAP": "SAP", "TEM": "TEM",
         # 전력/원전
         "ETN": "ETN", "VRT": "VRT", "GEV": "GEV", "SMR": "SMR",
-        "CEG": "CEG", "TLN": "TLN", "BWXT": "BWXT", "SU": "SU", "CMI": "CMI",
+        "CEG": "CEG", "TLN": "TLN", "BWXT": "BWXT", "CMI": "CMI",
         # Physical AI
         "TSLA": "TSLA", "DE": "DE", "SYM": "SYM",
         # 은행
         "C": "C", "JPM": "JPM", "BAC": "BAC", "GS": "GS",
         # 자동차
-        "GM": "GM", "F": "F", "CON": "CON",
+        "GM": "GM", "F": "F",
         # 에너지
         "XOM": "XOM", "COP": "COP", "BP": "BP", "TTE": "TTE",
         # 소재
@@ -648,7 +648,7 @@ def build_global_sheet(target_date):
         # 소비/유통
         "TGT": "TGT", "HD": "HD", "LOW": "LOW", "NKE": "NKE",
         # 친환경
-        "NEE": "NEE",
+        "NEE": "NEE", "SU": "SU",
     }
     if _sheet_us_sectors:
         us_stocks = {t: t for tks in _sheet_us_sectors.values() for t in tks}
@@ -771,19 +771,19 @@ def build_global_sheet(target_date):
         sector_groups = [(s, tks) for s, tks in _sheet_us_sectors.items()]
     else:
      sector_groups = [
-        ("반도체", ["SOX", "INTC", "AMD", "ARM", "AMAT", "ASML", "LRCX", "MU", "TXN", "NVDA", "AVGO", "MRVL", "COHR", "SNDK"]),
+        ("반도체", ["^SOX", "INTC", "AMD", "ARM", "AMAT", "ASML", "LRCX", "MU", "TXN", "NVDA", "AVGO", "MRVL", "COHR", "SNDK", "ASE", "STX"]),
         ("하드웨어", ["DELL", "ANET", "CSCO"]),
         ("빅테크", ["ORCL", "AAPL", "MSFT", "AMZN", "GOOG", "META", "NFLX"]),
-        ("소프트웨어", ["IBM", "ADBE", "CRM", "DDOG", "CRWD", "SNOW", "PLTR", "NOW", "SAP", "ISRG", "RDNT", "TEM"]),
-        ("전력/원전", ["ETN", "VRT", "GEV", "SMR", "CEG", "TLN", "BWXT", "SU", "CMI"]),
+        ("소프트웨어", ["IBM", "ADBE", "CRM", "DDOG", "CRWD", "SNOW", "PLTR", "NOW", "SAP", "TEM"]),
+        ("전력/원전", ["ETN", "VRT", "GEV", "SMR", "CEG", "TLN", "BWXT", "CMI"]),
         ("Physical AI(자동화 로봇)", ["TSLA", "DE", "SYM"]),
         ("은행", ["C", "JPM", "BAC", "GS"]),
-        ("자동차", ["GM", "F", "CON"]),
+        ("자동차", ["GM", "F"]),
         ("에너지", ["XOM", "COP", "BP", "TTE"]),
         ("소재", ["DD", "DOW_stock", "AA", "FCX"]),
         ("기계/운송", ["CAT", "FDX", "UPS"]),
         ("소비/유통", ["TGT", "HD", "LOW", "NKE"]),
-        ("친환경", ["NEE"]),
+        ("친환경", ["NEE", "SU"]),
     ]
 
     # 위험 진단

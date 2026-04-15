@@ -189,7 +189,9 @@ def classify_signal(close: pd.Series) -> dict:
             ps = (prior.iloc[-1] - prior.iloc[0]) / prior.iloc[0] / len(prior)
             rs = (recent.iloc[-1] - recent.iloc[0]) / recent.iloc[0] / len(recent)
             at_high_zone = prior.max() >= high_52w * 0.95
-            if ps > 0 and rs < 0 and abs(rs) > ps and at_high_zone:
+            # 5거래일 전 종가 하회 필터: 고점에서 소폭 꺾임 제외, 큰 폭 하락만 Sell
+            broke_5d_ago = last < close.iloc[-6]
+            if ps > 0 and rs < 0 and abs(rs) > ps and at_high_zone and broke_5d_ago:
                 sell_sign = True
 
     # === Short Sign ===
