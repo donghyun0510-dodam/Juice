@@ -231,10 +231,11 @@ def _log_if_due(scores: dict, sheet_name: str, state_key: str) -> None:
     if not scores:
         print(f"[notifier] {sheet_name}: scores 비어있음 — 스킵", flush=True)
         return
+    force = os.environ.get("FORCE_APPEND") == "1"
     state = _load_state()
     last_ts = state.get(state_key)
     now = datetime.now()
-    if last_ts:
+    if last_ts and not force:
         try:
             elapsed = (now - datetime.fromisoformat(last_ts)).total_seconds() / 60
             if elapsed < TIMESERIES_INTERVAL_MIN:
@@ -244,7 +245,8 @@ def _log_if_due(scores: dict, sheet_name: str, state_key: str) -> None:
         except Exception as e:
             print(f"[notifier] {sheet_name}: last_ts 파싱 실패 {e} — 그냥 append 시도", flush=True)
     else:
-        print(f"[notifier] {sheet_name}: 최초 기록 — append 시도", flush=True)
+        reason = "FORCE_APPEND=1" if force else "최초 기록"
+        print(f"[notifier] {sheet_name}: {reason} — append 시도", flush=True)
     if _append_row_to_sheet(sheet_name, scores):
         state[state_key] = now.isoformat()
         _save_state(state)

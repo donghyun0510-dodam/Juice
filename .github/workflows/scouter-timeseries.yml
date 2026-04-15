@@ -4,6 +4,11 @@ on:
     # 60분 간격 — 매시 정각 (UTC). notifier 내부 60분 가드로 중복 안전.
     - cron: "5 * * * *"
   workflow_dispatch:
+    inputs:
+      force_append:
+        description: "60분 가드 무시하고 강제 append (디버그)"
+        type: boolean
+        default: false
 
 concurrency:
   group: sheet-writer
@@ -35,6 +40,8 @@ jobs:
         run: printf '%s' "$GOOGLE_SA_JSON" > sa_credentials.json
 
       - name: Log scouter timeseries + performance
+        env:
+          FORCE_APPEND: ${{ inputs.force_append && '1' || '' }}
         run: python scouter_logger.py
 
       - name: Commit-back alert state
