@@ -1,8 +1,8 @@
 name: Scouter Timeseries & Performance
 on:
   schedule:
-    # 60분 간격 — 매시 정각 (UTC). notifier 내부 60분 가드로 중복 안전.
-    - cron: "5 * * * *"
+    # 60분 간격 — 매시 17분 (UTC). 정각 부근은 GH 부하로 스킵되기 쉬워 분산.
+    - cron: "17 * * * *"
   workflow_dispatch:
     inputs:
       force_append:
