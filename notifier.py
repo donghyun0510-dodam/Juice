@@ -163,16 +163,14 @@ def _append_row_to_sheet(sheet_name: str, scores: dict) -> bool:
         us_open = (_t >= _dtime(22, 30) and _wd <= 4) or (_t <= _dtime(5, 0) and 1 <= _wd <= 5)
         use_futures = not us_open
         sp500_ticker = "ES=F" if use_futures else "^GSPC"
-        sp500_close = sp500_prev = sp500_diff = None
+        sp500_close = None
         try:
-            hist = yf.Ticker(sp500_ticker).history(period="5d")
+            hist = yf.Ticker(sp500_ticker).history(period="2d")
             if len(hist) >= 1:
                 sp500_close = float(hist["Close"].iloc[-1])
-            if len(hist) >= 2:
-                sp500_prev = float(hist["Close"].iloc[-2])
-                sp500_diff = sp500_close - sp500_prev
         except Exception:
             pass
+        # sp500_diff 는 아래에서 '직전 시트 행'의 종가 대비로 계산 (상관분석용)
         sp500_close_label = (
             f"{sp500_close:.2f} (선물)" if (sp500_close is not None and use_futures)
             else (round(sp500_close, 2) if sp500_close is not None else "")
@@ -195,6 +193,20 @@ def _append_row_to_sheet(sheet_name: str, scores: dict) -> bool:
         existing = ws.get_all_values()
         if not existing or existing[0] != PERF_HEADERS:
             ws.update(range_name="A1", values=[PERF_HEADERS])
+
+        # 직전 로그 행의 S&P500 종가 대비 변동(pt) — 매크로종합과의 상관분석용
+        sp500_diff = None
+        if sp500_close is not None and len(existing) >= 2:
+            import re as _re
+            last_row = existing[-1]
+            if len(last_row) >= 7:
+                m = _re.search(r"-?\d+(?:\.\d+)?", str(last_row[6]).replace(",", ""))
+                if m:
+                    try:
+                        prev_close_row = float(m.group())
+                        sp500_diff = sp500_close - prev_close_row
+                    except Exception:
+                        pass
 
         from zoneinfo import ZoneInfo
         now = datetime.now(ZoneInfo("Asia/Seoul"))
