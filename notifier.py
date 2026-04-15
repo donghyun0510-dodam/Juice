@@ -23,7 +23,7 @@ PERF_SHEET_NAME = "스카우터_성과자료_v2"
 TIMESERIES_SHEET_NAME = "스카우터_매크로_타임시리즈"
 PERF_FOLDER_ID = os.environ.get("GSHEET_FOLDER_ID", "1oCzJUMAklZwXqBR67CmvzmFdZGg3wLuv")
 PERF_HEADERS = ["날짜", "T-RISK", "FX-RISK", "C-RISK", "VIX점수", "매크로종합",
-                "S&P500 종가", "S&P500 일변동%"]
+                "S&P500 종가", "S&P500 변동(pt)"]
 TIMESERIES_INTERVAL_MIN = 60
 STATE_SHEET_NAME = "스카우터_알림상태"
 
@@ -163,13 +163,14 @@ def _append_row_to_sheet(sheet_name: str, scores: dict) -> bool:
         us_open = (_t >= _dtime(22, 30) and _wd <= 4) or (_t <= _dtime(5, 0) and 1 <= _wd <= 5)
         use_futures = not us_open
         sp500_ticker = "ES=F" if use_futures else "^GSPC"
-        sp500_close = sp500_chg_pct = None
+        sp500_close = sp500_prev = sp500_diff = None
         try:
             hist = yf.Ticker(sp500_ticker).history(period="5d")
             if len(hist) >= 1:
                 sp500_close = float(hist["Close"].iloc[-1])
             if len(hist) >= 2:
-                sp500_chg_pct = (sp500_close / float(hist["Close"].iloc[-2]) - 1) * 100
+                sp500_prev = float(hist["Close"].iloc[-2])
+                sp500_diff = sp500_close - sp500_prev
         except Exception:
             pass
         sp500_close_label = (
@@ -213,7 +214,7 @@ def _append_row_to_sheet(sheet_name: str, scores: dict) -> bool:
             _r(scores.get("vix_score")),
             _r(scores.get("macro_total")),
             sp500_close_label,
-            _r(sp500_chg_pct, 2),
+            _r(sp500_diff, 2),
         ]
         ws.append_row(row)
         print(f"[notifier] {sheet_name} 기록 추가: {ts_label}")
