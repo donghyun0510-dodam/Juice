@@ -230,6 +230,10 @@ def collect_scores() -> dict:
     copper_chg = _chg_pct("HG=F")
     btc_chg = _chg_pct("BTC-USD")
 
+    print(f"[inputs] y2={y2} y10={y10} y30={y30} | dxy={dxy} jpy={jpy} cny={cny}", flush=True)
+    print(f"[inputs] wti={wti} brent={brent} gold={gold} copper_lb={copper_lb} copper_ton={copper_ton} vix={vix}", flush=True)
+    print(f"[inputs] chgs: wti={wti_chg} brent={brent_chg} oil_avg={oil_chg} gold={gold_chg} silver={silver_chg} copper={copper_chg} btc={btc_chg}", flush=True)
+
     t_risk = compute_t_risk(y2, y10, y30)
     fx_risk = compute_fx_risk(dxy, jpy, cny)
     c_risk = compute_c_risk(wti, brent, gold, copper_ton,
