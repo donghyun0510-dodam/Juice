@@ -1250,7 +1250,7 @@ with c2:
             <p class="gauge-score" style="color:{gc};">{total:.0f}<span class="unit"> / 100</span></p>
             <p class="gauge-grade" style="color:{gc};">{grade}</p>
             <div class="gauge-bar">
-                <div class="gauge-bar-fill" style="width:{min(total,100):.0f}%;background:linear-gradient(to right,{COLOR_SAFE} 0%,{COLOR_SAFE} 25%,{COLOR_CAUTION} 25%,{COLOR_CAUTION} 50%,{COLOR_DANGER} 50%,{COLOR_DANGER} 75%,{COLOR_CRISIS} 75%,{COLOR_CRISIS} 100%);background-size:{(100/min(total,100)*100) if total>0 else 100:.1f}% 100%;background-position:0 0;"></div>
+                <div class="gauge-bar-fill" style="width:{min(total,100):.0f}%;background:linear-gradient(to right,{COLOR_SAFE} 0%,{COLOR_SAFE} 22%,{COLOR_CAUTION} 28%,{COLOR_CAUTION} 47%,{COLOR_DANGER} 53%,{COLOR_DANGER} 72%,{COLOR_CRISIS} 78%,{COLOR_CRISIS} 100%);background-size:{(100/min(total,100)*100) if total>0 else 100:.1f}% 100%;background-position:0 0;"></div>
             </div>
         </div>
         """,
@@ -1278,14 +1278,16 @@ def _delta_html(delta):
     sign = "+" if delta > 0 else ""
     return f' <span style="color:{color};font-size:0.6em;font-weight:normal;">({sign}{delta:.0f})</span>'
 
-def _risk_gradient(th):
+def _risk_gradient(th, blend=3):
+    """경계 ±blend% 구간에서 부드럽게 색상 전환."""
     t1, t2, t3 = th
+    b = blend
     return (
         f"linear-gradient(to right,"
-        f"{COLOR_SAFE} 0%,{COLOR_SAFE} {t1}%,"
-        f"{COLOR_CAUTION} {t1}%,{COLOR_CAUTION} {t2}%,"
-        f"{COLOR_DANGER} {t2}%,{COLOR_DANGER} {t3}%,"
-        f"{COLOR_CRISIS} {t3}%,{COLOR_CRISIS} 100%)"
+        f"{COLOR_SAFE} 0%,{COLOR_SAFE} {t1-b}%,"
+        f"{COLOR_CAUTION} {t1+b}%,{COLOR_CAUTION} {t2-b}%,"
+        f"{COLOR_DANGER} {t2+b}%,{COLOR_DANGER} {t3-b}%,"
+        f"{COLOR_CRISIS} {t3+b}%,{COLOR_CRISIS} 100%)"
     )
 
 
