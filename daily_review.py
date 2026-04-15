@@ -50,6 +50,8 @@ def build_economic_indicators(target_date, country="US"):
     country_map = {
         "US": {"code": "5", "importance": ["3"], "label": "미국"},
         "KR": {"code": "11", "importance": ["2", "3"], "label": "한국"},
+        "CN": {"code": "37", "importance": ["3"], "label": "중국"},
+        "JP": {"code": "35", "importance": ["3"], "label": "일본"},
     }
     cfg = country_map[country]
     date_str = target_date.strftime("%Y-%m-%d")
@@ -1601,11 +1603,15 @@ def build_korea_sheet(target_date):
     rows.append(["", "개별기업", "", "", "", "", "", "", "", ""])
     rows.append(["", "", "", "", "", "", "", "", "", ""])
 
-    # 2. 경제지표 (investing.com - 한국 2성급 이상)
-    kr_econ = build_economic_indicators(target_date, country="KR")
-    if kr_econ:
+    # 2. 경제지표 (investing.com - 한국 2성급↑ + 중국·일본 3성급)
+    econ_all = []
+    for _cc in ("KR", "CN", "JP"):
+        for name, actual_dir, expected_prev in build_economic_indicators(target_date, country=_cc):
+            prefix = {"KR": "[한]", "CN": "[중]", "JP": "[일]"}[_cc]
+            econ_all.append((f"{prefix} {name}", actual_dir, expected_prev))
+    if econ_all:
         first = True
-        for name, actual_dir, expected_prev in kr_econ:
+        for name, actual_dir, expected_prev in econ_all:
             rows.append([
                 "2.경제지표" if first else "",
                 "",
