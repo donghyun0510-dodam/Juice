@@ -1250,7 +1250,7 @@ with c2:
             <p class="gauge-score" style="color:{gc};">{total:.0f}<span class="unit"> / 100</span></p>
             <p class="gauge-grade" style="color:{gc};">{grade}</p>
             <div class="gauge-bar">
-                <div class="gauge-bar-fill" style="width:{min(total,100):.0f}%;background:linear-gradient(90deg,{COLOR_SAFE},{COLOR_CAUTION},{COLOR_DANGER},{COLOR_CRISIS});"></div>
+                <div class="gauge-bar-fill" style="width:{min(total,100):.0f}%;background:linear-gradient(to right,{COLOR_SAFE} 0%,{COLOR_SAFE} 25%,{COLOR_CAUTION} 25%,{COLOR_CAUTION} 50%,{COLOR_DANGER} 50%,{COLOR_DANGER} 75%,{COLOR_CRISIS} 75%,{COLOR_CRISIS} 100%);background-size:{(100/min(total,100)*100) if total>0 else 100:.1f}% 100%;background-position:0 0;"></div>
             </div>
         </div>
         """,
