@@ -1725,9 +1725,11 @@ def analyze_trend_signals(all_tickers, with_live=True):
                     # 추가 게이트: 직전 구간의 고점이 52주 신고가 5% 이내 (고점권이어야 함)
                     high_52w_local = close.max()
                     at_high_zone = prior.max() >= high_52w_local * 0.95
+                    # 5거래일 전 종가 대비 3% 이상 추가 하락 시에만 Sell (중간 크기 눌림 제외)
+                    broke_5d_ago = last < close.iloc[-6] * 0.97 if len(close) >= 6 else False
                     if (prior_slope > 0 and recent_slope < 0
                             and abs(recent_slope) > prior_slope
-                            and at_high_zone):
+                            and at_high_zone and broke_5d_ago):
                         sell_sign_new = True
 
             # === Short Sign: 하락 추세 형성/강화 변곡점 ===
