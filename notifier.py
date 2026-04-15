@@ -191,7 +191,8 @@ def _append_row_to_sheet(sheet_name: str, scores: dict) -> bool:
         if not existing or existing[0] != PERF_HEADERS:
             ws.update(range_name="A1", values=[PERF_HEADERS])
 
-        now = datetime.now()
+        from zoneinfo import ZoneInfo
+        now = datetime.now(ZoneInfo("Asia/Seoul"))
         ts_label = now.strftime("%Y-%m-%d %H:%M")
 
         def _r(v, n=1):
