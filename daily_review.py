@@ -1205,11 +1205,11 @@ def compute_kr_macro_risk(krw_risk_total, bond_3y_val, wti_val):
 
 
 def scan_kr_featured_stocks(existing_tickers):
-    """KOSPI + KOSDAQ 중 추적 외 + 시총 2조원+ + Long Sign 종목 스캔
+    """KOSPI + KOSDAQ 중 추적 외 + 시총 3조원+ + Long Sign 종목 스캔
     (대시보드 '개별 주식 2 신규 Long Sign'과 동일 기준)"""
     from market_common import analyze_trend_signals as common_trend_signals
 
-    print("  한국 특징주 스캔 중 (KOSPI+KOSDAQ, 시총 2조원+, 대시보드와 동일 기준)...")
+    print("  한국 특징주 스캔 중 (KOSPI+KOSDAQ, 시총 3조원+, 대시보드와 동일 기준)...")
 
     candidates = []
     name_map = {}
@@ -1242,7 +1242,7 @@ def scan_kr_featured_stocks(existing_tickers):
                         mcap_100m = int(mcap_text)  # 억원 단위
                     except ValueError:
                         continue
-                    if mcap_100m < 20000:
+                    if mcap_100m < 30000:  # 3조원
                         continue
                     if any(kw in name for kw in [
                         "KODEX", "TIGER", "KBSTAR", "ARIRANG", "SOL", "HANARO",
