@@ -185,8 +185,12 @@ def _append_row_to_sheet(sheet_name: str, scores: dict) -> bool:
             # SA는 파일 생성 권한이 없음 — 시트를 사전에 개인 계정으로 만들고 SA에 공유해야 함
             print(f"[notifier] {sheet_name} 시트가 폴더에 없음 — 사전 생성 필요")
             return False
+        if len(files) > 1:
+            print(f"[notifier] ⚠️ {sheet_name} 중복 {len(files)}개 발견: {[f['id'] for f in files]}")
+        print(f"[notifier] {sheet_name} → file_id={files[0]['id']}")
         sh = gc.open_by_key(files[0]["id"])
         ws = sh.sheet1
+        print(f"[notifier] → worksheet='{ws.title}' id={ws.id}")
         existing = ws.get_all_values()
         if not existing or existing[0] != PERF_HEADERS:
             ws.update(range_name="A1", values=[PERF_HEADERS])
