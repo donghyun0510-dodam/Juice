@@ -22,7 +22,17 @@ jobs:
       GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install Python deps
+        run: pip install -r requirements.txt
+
+      - name: Write SA credentials
+        run: printf '%s' "$GOOGLE_SA_JSON" > sa_credentials.json
 
       - name: Log scouter timeseries + performance
         run: python scouter_logger.py
