@@ -23,7 +23,7 @@ PERF_SHEET_NAME = "스카우터_성과자료_v2"
 TIMESERIES_SHEET_NAME = "스카우터_매크로_타임시리즈"
 PERF_FOLDER_ID = os.environ.get("GSHEET_FOLDER_ID", "1oCzJUMAklZwXqBR67CmvzmFdZGg3wLuv")
 PERF_HEADERS = ["날짜", "T-RISK", "FX-RISK", "C-RISK", "VIX점수", "매크로종합",
-                "S&P500 종가", "S&P500 변동(pt)"]
+                "S&P500 종가", "S&P500 변동(pt)", "구분"]
 TIMESERIES_INTERVAL_MIN = 60
 STATE_SHEET_NAME = "스카우터_알림상태"
 
@@ -171,10 +171,8 @@ def _append_row_to_sheet(sheet_name: str, scores: dict) -> bool:
         except Exception:
             pass
         # sp500_diff 는 아래에서 '직전 시트 행'의 종가 대비로 계산 (상관분석용)
-        sp500_close_label = (
-            f"{sp500_close:.2f} (선물)" if (sp500_close is not None and use_futures)
-            else (round(sp500_close, 2) if sp500_close is not None else "")
-        )
+        sp500_close_label = round(sp500_close, 2) if sp500_close is not None else ""
+        sp500_kind_label = "선물" if (sp500_close is not None and use_futures) else ""
 
         q = (f"name='{sheet_name}' and '{PERF_FOLDER_ID}' in parents "
              "and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false")
@@ -227,6 +225,7 @@ def _append_row_to_sheet(sheet_name: str, scores: dict) -> bool:
             _r(scores.get("macro_total")),
             sp500_close_label,
             _r(sp500_diff, 2),
+            sp500_kind_label,
         ]
         ws.append_row(row)
         print(f"[notifier] {sheet_name} 기록 추가: {ts_label}")
