@@ -40,7 +40,7 @@ jobs:
       - name: Write SA credentials
         run: printf '%s' "$GOOGLE_SA_JSON" > sa_credentials.json
 
-      - name: Log scouter timeseries + performance
+      - name: Log scouter timeseries
         env:
           FORCE_APPEND: ${{ inputs.force_append && '1' || '' }}
         run: python scouter_logger.py

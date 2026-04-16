@@ -37,10 +37,9 @@ def main():
         print("[scouter_logger] 모든 점수가 0 — fetch 실패로 간주, 기록 스킵", flush=True)
         return 1
 
-    from notifier import log_timeseries_if_due, log_perf_if_due, check_and_notify_macro
+    from notifier import log_timeseries_if_due, check_and_notify_macro
     payload = {k: scores[k] for k in keys}
     log_timeseries_if_due(payload)
-    log_perf_if_due(payload)
     check_and_notify_macro(scores.get("macro_total"), scores=payload)
     return 0
 

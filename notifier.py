@@ -19,7 +19,6 @@ COOLDOWN_MIN = 30               # 동일 방향 알림 쿨다운 (분)
 GRADE_ORDER = ["안정", "주의", "위험", "고위험"]
 
 # 성과 기록 시트
-PERF_SHEET_NAME = "스카우터_성과자료_v2"
 TIMESERIES_SHEET_NAME = "스카우터_매크로_타임시리즈"
 PERF_FOLDER_ID = os.environ.get("GSHEET_FOLDER_ID", "1oCzJUMAklZwXqBR67CmvzmFdZGg3wLuv")
 PERF_HEADERS = ["날짜", "T-RISK", "FX-RISK", "C-RISK", "VIX점수", "매크로종합",
@@ -235,10 +234,6 @@ def _append_row_to_sheet(sheet_name: str, scores: dict) -> bool:
         return False
 
 
-def _append_perf_log(scores: dict) -> None:
-    _append_row_to_sheet(PERF_SHEET_NAME, scores)
-
-
 def _log_if_due(scores: dict, sheet_name: str, state_key: str) -> None:
     if not scores:
         print(f"[notifier] {sheet_name}: scores 비어있음 — 스킵", flush=True)
@@ -267,11 +262,6 @@ def _log_if_due(scores: dict, sheet_name: str, state_key: str) -> None:
 def log_timeseries_if_due(scores: dict) -> None:
     """60분 간격으로 타임시리즈 시트에 전수 기록."""
     _log_if_due(scores, TIMESERIES_SHEET_NAME, "last_timeseries_ts")
-
-
-def log_perf_if_due(scores: dict) -> None:
-    """60분 간격으로 성과자료 시트에 전수 기록 (이메일 無)."""
-    _log_if_due(scores, PERF_SHEET_NAME, "last_perf_ts")
 
 
 def check_and_notify_macro(macro_total: float, scores: dict | None = None) -> None:
