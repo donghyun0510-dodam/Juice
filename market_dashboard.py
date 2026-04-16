@@ -1889,9 +1889,9 @@ _sign_section("long", "📈 Long Sign — 진입·분할매수 후보", long_hit
               "200MA 상향돌파 또는 20일 신고가 + 정배열 — 40/30/30 분할 매수 후보", expanded=False)
 _sign_section("sell", "📉 Sell Sign — 분할매도 후보", sell_hits,
               "상승권 50MA 하향이탈 — 40/30/30 분할 매도 후보", expanded=False)
-_sign_section("short", "🔻 Short Sign — 대세하락 전환 (참고)", short_hits,
+_sign_section("short", "🔻 Short Sign — 대세하락 전환", short_hits,
               "200MA 하향이탈 또는 20일 신저가 + 역배열 — 신규 매수 중단 시그널", expanded=False)
-_sign_section("cover", "🔺 Short Cover — 하락세 완화 (참고)", cover_hits,
+_sign_section("cover", "🔺 Short Cover — 하락세 완화", cover_hits,
               "하락권 50MA 상향이탈 — 반등 시도, Long sign 재확립 전까지 관망")
 _sign_section("hold_long", "✅ 추세 유지 중 (Long hold)", hold_long,
               "정배열 상태 유지 — 신규 신호 없음, 보유 지속")
