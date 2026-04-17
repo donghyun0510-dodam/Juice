@@ -1036,7 +1036,7 @@ st.markdown(f"""
     .idx-card {{
         background: {CARD_BG}; border: 1px solid {CARD_BORDER};
         border-radius: 10px; padding: 18px 12px; text-align: center;
-        position: relative; overflow: hidden;
+        position: relative; overflow: visible;
     }}
     .idx-card::before {{
         content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
@@ -1065,6 +1065,18 @@ st.markdown(f"""
     }}
     .tt:hover .tt-box, .tt:focus .tt-box, .tt:active .tt-box {{ display: block; }}
     .idx-card .idx-val {{ font-size: 18px; font-weight: 600; margin: 4px 0 0 0; font-family: 'Consolas', monospace; }}
+
+    /* 지수 카드 툴팁이 부모 컨테이너에서 잘리지 않도록 overflow 전파 (:has 없이 전역 적용) */
+    [data-testid="stHorizontalBlock"],
+    [data-testid="stHorizontalBlock"] > div,
+    [data-testid="stColumn"],
+    [data-testid="stVerticalBlock"],
+    [data-testid="stMarkdownContainer"],
+    [data-testid="stMarkdown"],
+    [data-testid="element-container"] {{
+        overflow: visible !important;
+    }}
+    .idx-card, .idx-card .idx-name, .idx-card p {{ overflow: visible !important; }}
 
     /* 진단 박스 */
     .diagnosis-box {{
