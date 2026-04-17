@@ -1,7 +1,7 @@
 name: Daily Review - Korea
 on:
   schedule:
-    - cron: "0 7 * * 1-5"   # 16:00 KST (07:00 UTC) · 월~금
+    - cron: "17 7 * * 1-5"  # 16:17 KST (07:17 UTC) · 월~금 — 정각 혼잡 회피
   workflow_dispatch:
 
 concurrency:

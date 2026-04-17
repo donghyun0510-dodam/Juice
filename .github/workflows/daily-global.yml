@@ -1,7 +1,7 @@
 name: Daily Review - Global
 on:
   schedule:
-    - cron: "15 20 * * 1-5"  # 05:15 KST (전일 20:15 UTC) · 월~금 — 정각 혼잡 회피
+    - cron: "7 20 * * 1-5"   # 05:07 KST (전일 20:07 UTC) · 월~금 — 정각 혼잡 회피
   workflow_dispatch:
 
 concurrency:

@@ -55,12 +55,27 @@ python daily_review.py
 - 구글 시트 API rate limit 방지를 위해 시트 간 `time.sleep(1)` 삽입
 - 경제지표는 전날 날짜 기준, 주말이면 금요일로 자동 조정
 
-## 자동 실행 설정
-| 작업 | 스케줄러 이름 | 시간 | 배치 파일 | 로그 |
-|------|-------------|------|----------|------|
-| 글로벌 시트 | `StockReview_Global` | 매일 05:00 | `run_global.bat` (`--global-only`) | `log_global.txt` |
-| 국장 시트 | `StockReview_Korea` | 매일 16:00 | `run_korea.bat` (`--korea-only`) | `log_korea.txt` |
+## 자동 실행 설정 (GitHub Actions)
+모든 스케줄 자동화는 **GitHub Actions 워크플로우**(`.github/workflows/*.yml`)로 실행됨. 러너는 `ubuntu-latest`, `TZ=Asia/Seoul`로 설정.
 
-- 공통 설정: 배터리 무관, 네트워크 필요, 놓친 실행 시 다음 로그인 때 즉시 실행, 최대 30분
-- 글로벌: 전일 미국 증시 데이터 + 전일 미국 경제지표
-- 국장: 당일 한국 증시 데이터 + 당일 한국 경제지표 (오후 8시라 당일 발표분 반영)
+| 워크플로우 파일 | 이름 | Cron (UTC) | KST 환산 | 실행 명령 |
+|---------------|------|-----------|---------|----------|
+| `daily-global.yml` | Daily Review - Global | `15 20 * * 1-5` | 월~금 05:15 | `python daily_review.py --global-only` |
+| `daily-korea.yml` | Daily Review - Korea | `0 7 * * 1-5` | 월~금 16:00 | `python daily_review.py --korea-only` |
+| `intraday-global.yml` | Intraday Scan - Global | `*/10 13-21 * * 1-5` | 월~금 22:30~06:00 10분 간격 | `python intraday_scan.py --market global` |
+| `intraday-korea.yml` | Intraday Scan - Korea | `*/10 0-6 * * 1-5` | 월~금 09:00~15:30 10분 간격 | `python intraday_scan.py --market korea` |
+| `scouter-timeseries.yml` | Scouter Timeseries & Performance | `17 * * * *` | 매시 17분 | `python scouter_logger.py` |
+
+### 공통 구성
+- `concurrency.group: sheet-writer` — 시트 쓰기 워크플로우가 동시에 실행되지 않도록 직렬화
+- 공통 셋업: `.github/actions/setup/action.yml` (Python 3.12, pip 캐시, `requirements.txt` 설치, `trendfollow-rules-DH` 프라이빗 레포에서 `signal-judge.md` 주입, SA 자격증명 기록)
+- Secrets: `GOOGLE_OAUTH_TOKEN_B64`, `GOOGLE_SA_JSON`, `GSHEET_FOLDER_ID`, `RULES_DEPLOY_KEY`, `GMAIL_APP_PASSWORD`
+- 상태 파일(`signal_snapshot.json`, `macro_snapshot.json`, `long_sign_seen.json`, `kr_promotion_tracker.json`, `macro_alert_state.json`)은 실행 후 `github-actions[bot]`이 `[skip ci]` 커밋으로 main에 commit-back
+
+### 수동 실행
+- GitHub Actions 탭에서 `workflow_dispatch` 수동 트리거 가능
+- 로컬에서 동일한 동작: `python daily_review.py --global-only` / `--korea-only` 직접 실행
+
+### 주의
+- GitHub Actions는 **레포 활동이 60일간 없으면 스케줄 cron을 자동 비활성화**함 → 정기적으로 확인 필요
+- 구버전 Windows Task Scheduler(`StockReview_Global`/`StockReview_Korea`)와 로컬 `run_*.bat`은 **더 이상 사용하지 않음** (히스토리 용도로만 남아있음)
