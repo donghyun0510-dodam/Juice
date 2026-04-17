@@ -22,7 +22,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 FOLDER_ID = os.environ.get("GSHEET_FOLDER_ID", "1oCzJUMAklZwXqBR67CmvzmFdZGg3wLuv")
 DEFAULT_SHEET = "스카우터_매크로_타임시리즈"
 MACRO_COLS = ["T-RISK", "FX-RISK", "C-RISK", "VIX점수", "매크로종합"]
-Y_COL = "S&P500 일변동%"
+Y_COL = "S&P500 변동(%)"
 
 
 def _get_creds():

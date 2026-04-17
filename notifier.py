@@ -22,7 +22,7 @@ GRADE_ORDER = ["안정", "주의", "위험", "고위험"]
 TIMESERIES_SHEET_NAME = "스카우터_매크로_타임시리즈"
 PERF_FOLDER_ID = os.environ.get("GSHEET_FOLDER_ID", "1oCzJUMAklZwXqBR67CmvzmFdZGg3wLuv")
 PERF_HEADERS = ["날짜", "T-RISK", "FX-RISK", "C-RISK", "VIX점수", "매크로종합",
-                "S&P500 종가", "S&P500 변동(pt)", "구분"]
+                "S&P500 종가", "S&P500 변동(%)", "구분"]
 TIMESERIES_INTERVAL_MIN = 60
 STATE_SHEET_NAME = "스카우터_알림상태"
 
@@ -191,7 +191,8 @@ def _append_row_to_sheet(sheet_name: str, scores: dict) -> bool:
         if not existing or existing[0] != PERF_HEADERS:
             ws.update(range_name="A1", values=[PERF_HEADERS])
 
-        # 직전 로그 행의 S&P500 종가 대비 변동(pt) — 매크로종합과의 상관분석용
+        # 직전 로그 행의 S&P500 종가 대비 변동(%) — 매크로종합과의 상관분석용
+        # 지수 레벨 드리프트에 불변이도록 pt가 아닌 %로 기록
         sp500_diff = None
         if sp500_close is not None and len(existing) >= 2:
             import re as _re
@@ -201,7 +202,8 @@ def _append_row_to_sheet(sheet_name: str, scores: dict) -> bool:
                 if m:
                     try:
                         prev_close_row = float(m.group())
-                        sp500_diff = sp500_close - prev_close_row
+                        if prev_close_row != 0:
+                            sp500_diff = (sp500_close - prev_close_row) / prev_close_row * 100
                     except Exception:
                         pass
 
