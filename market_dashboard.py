@@ -525,13 +525,15 @@ def compute_c_risk(wti, brent, gold, copper, silver=None, btc_chg=None,
     # 경기 해석 변수(유가·구리)는 signed, 안전/투기 변수(금·은·BTC)는 변동성 자체를 불안 신호로 간주
     momentum = 0
 
-    # 유가: 상승만 가산(인플레 재점화). 중립선(85) 위에서 급락은 oil_score 상쇄(인플레 완화 신호)
+    # 유가: 상승만 가산(인플레 재점화). 중립선(85) 위에서 급락은 oil_score 상쇄(인플레 완화 신호).
+    # 단, 하루 움직임은 구조적 유가 리스크의 최대 50%까지만 해갈 — 구조 수준까지 하루에 뒤집지 않도록 캡.
     v = chg_num(oil_chg)
     if v is not None:
         if v > 2:
             momentum += (v - 2) * 5
         elif v < -2 and oil_score > 0:
-            oil_score = max(0, oil_score - (abs(v) - 2) * 3)
+            relief = min(oil_score * 0.5, (abs(v) - 2) * 3)
+            oil_score -= relief
 
     # 구리: 하락만 가산(경기침체 우려). 상승은 경기호조 → 비가산
     v = chg_num(copper_chg)

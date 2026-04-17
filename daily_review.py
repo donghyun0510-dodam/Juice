@@ -370,13 +370,15 @@ def compute_c_risk_index(wti_val, brent_val, gold_val, copper_val,
     _chg = lambda c: (parse_pct(c) if isinstance(c, str) else c)
     momentum = 0
 
-    # 유가: 상승만 가산(인플레 재점화). 중립선(85) 위에서 급락은 oil_score 상쇄(인플레 완화 신호)
+    # 유가: 상승만 가산(인플레 재점화). 중립선(85) 위에서 급락은 oil_score 상쇄(인플레 완화 신호).
+    # 단, 하루 움직임은 구조적 유가 리스크의 최대 50%까지만 해갈 — 구조 수준까지 하루에 뒤집지 않도록 캡.
     v = _chg(oil_chg)
     if v is not None:
         if v > 2:
             momentum += (v - 2) * 5
         elif v < -2 and oil_score > 0:
-            oil_score = max(0, oil_score - (abs(v) - 2) * 3)
+            relief = min(oil_score * 0.5, (abs(v) - 2) * 3)
+            oil_score -= relief
 
     # 구리: 하락만 가산(경기침체 우려). 상승은 경기호조 → 비가산
     v = _chg(copper_chg)
