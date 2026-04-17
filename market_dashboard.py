@@ -521,13 +521,30 @@ def compute_c_risk(wti, brent, gold, copper, silver=None, btc_chg=None,
         # 0.35→0, 0.55→20 선형, 극단값 캡
         gc_score = max(0, min(25, (gc_ratio - 0.35) / 0.20 * 20))
 
-    # 3) 단기 모멘텀: 원자재·BTC의 일변동 절대값 합산 (2% 이상부터 가산)
+    # 3) 단기 모멘텀 — 방향성 반영
+    # 경기 해석 변수(유가·구리)는 signed, 안전/투기 변수(금·은·BTC)는 변동성 자체를 불안 신호로 간주
     momentum = 0
-    for chg in (oil_chg, gold_chg, silver_chg, copper_chg, btc_chg):
+
+    # 유가: 상승만 가산(인플레 재점화). 중립선(85) 위에서 급락은 oil_score 상쇄(인플레 완화 신호)
+    v = chg_num(oil_chg)
+    if v is not None:
+        if v > 2:
+            momentum += (v - 2) * 5
+        elif v < -2 and oil_score > 0:
+            oil_score = max(0, oil_score - (abs(v) - 2) * 3)
+
+    # 구리: 하락만 가산(경기침체 우려). 상승은 경기호조 → 비가산
+    v = chg_num(copper_chg)
+    if v is not None and v < -2:
+        momentum += (abs(v) - 2) * 5
+
+    # 금·은·BTC: 변동성 자체가 불안 신호 → 절댓값 유지
+    for chg in (gold_chg, silver_chg, btc_chg):
         v = chg_num(chg)
         if v is None:
             continue
         momentum += max(0, abs(v) - 2) * 5  # 2%→0, 4%→10, 6%→20
+
     momentum = min(momentum, 50)
 
     # oil(가중2.0) + gc(가중1.0) + momentum(그대로) — 총합 캡 100
