@@ -85,8 +85,8 @@ def load_tracking_tickers_from_sheet():
                 ticker = (row[2] or "").strip()
                 if not ticker:
                     continue
-                # 지수·특징주(일시) 제외 (단, ^SOX 등 명시적으로 추적하는 지수는 허용)
-                if ticker.startswith("^") and ticker not in ("^SOX",):
+                # 지수 제외 — ^SOX 등은 개별종목이 아니므로 추적 대상 아님
+                if ticker.startswith("^"):
                     continue
                 if sector in ("특징주",):
                     continue
