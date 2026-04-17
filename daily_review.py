@@ -386,12 +386,17 @@ def compute_c_risk_index(wti_val, brent_val, gold_val, copper_val,
     if v is not None and v < -2:
         momentum += (abs(v) - 2) * 5
 
-    # 금·은·BTC: 변동성 자체가 불안 신호 → 절댓값 유지
-    for chg in (gold_chg, silver_chg, btc_chg):
+    # 금: threshold 2% (안전자산 쏠림 민감)
+    v = _chg(gold_chg)
+    if v is not None:
+        momentum += max(0, abs(v) - 2) * 5
+
+    # 은·BTC: 자체 변동성 크므로 threshold 4% (노이즈 제거)
+    for chg in (silver_chg, btc_chg):
         v = _chg(chg)
         if v is None:
             continue
-        momentum += max(0, abs(v) - 2) * 5
+        momentum += max(0, abs(v) - 4) * 5
 
     momentum = min(momentum, 50)
 
