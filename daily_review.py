@@ -379,6 +379,7 @@ def compute_c_risk_index(wti_val, brent_val, gold_val, copper_val,
         elif v < -2 and oil_score > 0:
             relief = min(oil_score * 0.5, (abs(v) - 2) * 3)
             oil_score -= relief
+            momentum += (abs(v) - 2) * 2.5  # 변동성 자체도 리스크 — 상승의 절반 가중치
 
     # 구리: 하락만 가산(경기침체 우려). 상승은 경기호조 → 비가산
     v = _chg(copper_chg)
