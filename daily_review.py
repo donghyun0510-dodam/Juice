@@ -563,6 +563,42 @@ def scan_featured_stocks(existing_tickers):
     return featured
 
 
+# ── 익일 옵션 만기 판별 ──
+KR_WEEKDAY = ["월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일"]
+
+
+def _next_business_day(date):
+    """주말 건너뛴 다음 영업일 (미국·한국 공통, 공휴일은 미고려)"""
+    nxt = date + timedelta(days=1)
+    while nxt.weekday() >= 5:
+        nxt += timedelta(days=1)
+    return nxt
+
+
+def get_us_option_expiry(date):
+    """미국 옵션 의미 있는 만기 이벤트 → (요일, 설명) 또는 None.
+    금요일만 유의미 — 3번째 금(월간), 3·6·9·12월 3번째 금(쿼드 위칭), 그 외 금(주간)."""
+    if date.weekday() != 4:
+        return None
+    is_third_friday = 15 <= date.day <= 21
+    if is_third_friday:
+        if date.month in (3, 6, 9, 12):
+            return ("금요일", "쿼드러플 위칭 (지수선물·옵션 동시만기)")
+        return ("금요일", "월간 옵션 만기 (3번째 금요일)")
+    return ("금요일", "주간 옵션 만기")
+
+
+def get_kr_option_expiry(date):
+    """KOSPI200 옵션 만기 이벤트 → (요일, 설명) 또는 None.
+    목요일만 유의미 — 2번째 목(월간), 그 외 목(주간)."""
+    if date.weekday() != 3:
+        return None
+    is_second_thursday = 8 <= date.day <= 14
+    if is_second_thursday:
+        return ("목요일", "KOSPI200 월간 옵션 만기 (2번째 목요일)")
+    return ("목요일", "KOSPI200 주간 옵션 만기")
+
+
 # ── 글로벌 시트 데이터 구성 ──
 def build_global_sheet(target_date):
     print("글로벌 데이터 수집 중...")
@@ -1008,17 +1044,14 @@ def build_global_sheet(target_date):
     rows.append(["", "", "", "", ""])
     rows.append(["", "", "", "", ""])
 
-    # 6. 종합 요약 (수동)
-    rows.append(["6.종합 요약", "시장 흐름", "상승/하락 요인", "", ""])
-    rows.append(["", "", "특징주(Long Sign)", "", ""])
-    rows.append(["", "", "특징주(랠리)", "", ""])
-    rows.append(["", "", "특징주(단기조정)", "", ""])
-    rows.append(["", "", "특징주(추세상실)", "", ""])
-    rows.append(["", "", "", "", ""])
-
-    # 7. 결론 (수동)
-    rows.append(["7.결론", "투자 관점", "위험 시그널", "", ""])
-    rows.append(["", "주도 섹터", "핵심 종목", "", ""])
+    # 6. 옵션여부 (익일 주요 미국 옵션 만기)
+    next_day = _next_business_day(target_date)
+    expiry = get_us_option_expiry(next_day)
+    if expiry:
+        day_str, type_str = expiry
+        rows.append(["6.옵션여부", day_str, type_str, "", ""])
+    else:
+        rows.append(["6.옵션여부", KR_WEEKDAY[next_day.weekday()], "주요 만기 없음", "", ""])
 
     return rows, risk_cells, color_cells, perf_metrics
 
@@ -1734,17 +1767,14 @@ def build_korea_sheet(target_date):
     rows.append(["", "", "", "", "", "", "", "", "", ""])
     rows.append(["", "", "", "", "", "", "", "", "", ""])
 
-    # 6. 종합 요약 (수동)
-    rows.append(["6.종합 요약", "시장 흐름", "상승/하락 요인", "", "", "", "", "", "", ""])
-    rows.append(["", "", "특징주(Long Sign)", "", "", "", "", "", "", ""])
-    rows.append(["", "", "특징주(랠리)", "", "", "", "", "", "", ""])
-    rows.append(["", "", "특징주(단기조정)", "", "", "", "", "", "", ""])
-    rows.append(["", "", "특징주(추세상실)", "", "", "", "", "", "", ""])
-    rows.append(["", "", "", "", "", "", "", "", "", ""])
-
-    # 7. 결론 (수동)
-    rows.append(["7.결론", "투자 관점", "위험 시그널", "", "", "", "", "", "", ""])
-    rows.append(["", "주도 섹터", "핵심 종목", "", "", "", "", "", "", ""])
+    # 6. 옵션여부 (익일 KOSPI200 옵션 만기)
+    next_day = _next_business_day(target_date)
+    expiry = get_kr_option_expiry(next_day)
+    if expiry:
+        day_str, type_str = expiry
+        rows.append(["6.옵션여부", day_str, type_str, "", "", "", "", "", "", ""])
+    else:
+        rows.append(["6.옵션여부", KR_WEEKDAY[next_day.weekday()], "주요 만기 없음", "", "", "", "", "", "", ""])
 
     return rows, risk_cells, color_cells
 
