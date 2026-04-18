@@ -2324,6 +2324,17 @@ def _render_last_diff_banner():
         unsafe_allow_html=True,
     )
 
+# ── 미국 ──
+if us_err:
+    st.warning(f"S&P 500 스캔 실패: {us_err}")
+else:
+    with st.expander(f"🇺🇸 미국 신규 Long Sign ({len(us_longs)}개)", expanded=False):
+        if us_longs:
+            sorted_hits = sorted(us_longs.items(), key=lambda x: -x[1]["chg"])
+            st.markdown("".join(_fmt_row(t, i) for t, i in sorted_hits), unsafe_allow_html=True)
+        else:
+            st.markdown("_신규 Long sign 발생 종목 없음_")
+
 # ── 한국 ──
 if kr_err:
     st.warning(f"KOSPI 200 스캔 실패: {kr_err}")
