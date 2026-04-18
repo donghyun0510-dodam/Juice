@@ -171,6 +171,21 @@ def _yf_prev_close(ticker):
     return None
 
 
+def _yf_daily_pct(ticker):
+    """최근 2개 일봉 종가 간 %변동. compute_c_risk 모멘텀 입력 전용 — 실시간 티커의
+    슬라이딩 1-day %change와 달리 세션 휴지기에도 값이 고정(주말 Fri settle 유지).
+    단 BTC 등 24/7 종목은 UTC 00:00에 캔들이 롤오버되므로 완전 고정은 아님."""
+    try:
+        h = yf.Ticker(ticker).history(period="5d")["Close"].dropna()
+        if len(h) >= 2:
+            prev, last = float(h.iloc[-2]), float(h.iloc[-1])
+            if prev > 0:
+                return (last - prev) / prev * 100
+    except Exception:
+        pass
+    return None
+
+
 def _scrape_investing(url):
     try:
         headers = {
@@ -596,14 +611,29 @@ def collect_macro_scores() -> dict:
             _, _, vix = get_price_and_change("^VIX")
 
     # 점수 계산
-    oil_chg_avg = avg_chg(wti_chg, brent_chg)
+    # 모멘텀 입력은 yfinance 일봉 간 %변동 사용 — 실시간 슬라이딩 %change는 세션 마감
+    # 후에도 값이 계속 바뀌어 daily_review 스냅샷과 dashboard/scouter 점수가 어긋남.
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        f_wti_d = ex.submit(_yf_daily_pct, "CL=F")
+        f_brent_d = ex.submit(_yf_daily_pct, "BZ=F")
+        f_gold_d = ex.submit(_yf_daily_pct, "GC=F")
+        f_silver_d = ex.submit(_yf_daily_pct, "SI=F")
+        f_copper_d = ex.submit(_yf_daily_pct, "HG=F")
+        f_btc_d = ex.submit(_yf_daily_pct, "BTC-USD")
+    wti_daily = f_wti_d.result()
+    brent_daily = f_brent_d.result()
+    gold_daily = f_gold_d.result()
+    silver_daily = f_silver_d.result()
+    copper_daily = f_copper_d.result()
+    btc_daily = f_btc_d.result()
+    oil_chg_avg = avg_chg(wti_daily, brent_daily)
     _, t_risk, _ = compute_t_risk(y2, y10, y30)
     fx_risk = compute_fx_risk(dxy, jpy, cny)
     c_risk, oil_avg, gc_ratio = compute_c_risk(
         wti, brent, gold, copper,
-        silver=silver, btc_chg=btc_chg,
-        oil_chg=oil_chg_avg, gold_chg=gold_chg,
-        silver_chg=silver_chg, copper_chg=copper_chg,
+        silver=silver, btc_chg=btc_daily,
+        oil_chg=oil_chg_avg, gold_chg=gold_daily,
+        silver_chg=silver_daily, copper_chg=copper_daily,
     )
     vix_score = compute_vix_score(vix)
     macro_total = min(

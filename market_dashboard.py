@@ -655,6 +655,21 @@ def _yf_prev_close(ticker):
     return None
 
 
+def _yf_daily_pct(ticker):
+    """최근 2개 일봉 종가 간 %변동. compute_c_risk 모멘텀 입력 전용 — 실시간 티커의
+    슬라이딩 1-day %change와 달리 세션 휴지기에도 값이 고정(주말 Fri settle 유지).
+    단 BTC 등 24/7 종목은 UTC 00:00에 캔들이 롤오버되므로 완전 고정은 아님."""
+    try:
+        h = yf.Ticker(ticker).history(period="5d")["Close"].dropna()
+        if len(h) >= 2:
+            prev, last = float(h.iloc[-2]), float(h.iloc[-1])
+            if prev > 0:
+                return (last - prev) / prev * 100
+    except Exception:
+        pass
+    return None
+
+
 def _compute_yesterday_baseline():
     """yfinance 일봉 전일 종가로부터 어제의 4대 risk 점수 재구성"""
     try:
@@ -772,16 +787,24 @@ def collect_all_data():
     # 종합 점수 계산
     t_raw, data["t_risk"], data["spread"] = compute_t_risk(data["2y"], data["10y"], data["30y"])
     data["fx_risk"] = compute_fx_risk(data["dxy"], data["usd_jpy"], data["usd_cny"])
-    # 유가 평균 등락(WTI/Brent) — 모멘텀 입력
-    oil_chg_avg = avg_chg(data.get("wti_chg"), data.get("brent_chg"))
+    # 모멘텀 입력은 yfinance 일봉 간 %변동을 사용 — 실시간 슬라이딩 %change는 세션
+    # 마감 후에도 값이 계속 바뀌어 daily_review 스냅샷과 대시보드 점수가 어긋남.
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        f_wti_d = ex.submit(_yf_daily_pct, "CL=F")
+        f_brent_d = ex.submit(_yf_daily_pct, "BZ=F")
+        f_gold_d = ex.submit(_yf_daily_pct, "GC=F")
+        f_silver_d = ex.submit(_yf_daily_pct, "SI=F")
+        f_copper_d = ex.submit(_yf_daily_pct, "HG=F")
+        f_btc_d = ex.submit(_yf_daily_pct, "BTC-USD")
+    oil_chg_avg = avg_chg(f_wti_d.result(), f_brent_d.result())
     data["c_risk"], data["oil_avg"], data["gc_ratio"] = compute_c_risk(
         data["wti"], data["brent"], data["gold"], data["copper"],
         silver=data.get("silver"),
-        btc_chg=data.get("btc_chg_str"),
+        btc_chg=f_btc_d.result(),
         oil_chg=oil_chg_avg,
-        gold_chg=data.get("gold_chg_str"),
-        silver_chg=data.get("silver_chg"),
-        copper_chg=data.get("copper_chg"),
+        gold_chg=f_gold_d.result(),
+        silver_chg=f_silver_d.result(),
+        copper_chg=f_copper_d.result(),
     )
     data["vix_score"] = compute_vix_score(data["vix"])
 

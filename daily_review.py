@@ -173,6 +173,21 @@ def get_price_and_change(ticker_symbol):
         return "", ""
 
 
+def _yf_daily_pct(ticker):
+    """최근 2개 일봉 종가 간 %변동. compute_c_risk_index 모멘텀 입력 전용 — 실시간
+    티커의 슬라이딩 1-day %change와 달리 세션 휴지기에도 값이 고정(주말 Fri settle 유지).
+    단 BTC 등 24/7 종목은 UTC 00:00에 캔들이 롤오버되므로 완전 고정은 아님."""
+    try:
+        h = yf.Ticker(ticker).history(period="5d")["Close"].dropna()
+        if len(h) >= 2:
+            prev, last = float(h.iloc[-2]), float(h.iloc[-1])
+            if prev > 0:
+                return (last - prev) / prev * 100
+    except Exception:
+        pass
+    return None
+
+
 # ── 위험 진단 함수 ──
 def parse_price(price_str):
     """포맷된 가격 문자열을 숫자로 변환"""
@@ -875,23 +890,25 @@ def build_global_sheet(target_date):
     brent_risk, brent_rc = assess_risk("BRN", brent_val)
     wti_risk, wti_rc = assess_risk("WTI", wti_val)
     copper_risk, copper_rc = assess_copper_risk()
-    # 유가 평균 등락
-    _wti_pct = parse_pct(wti_chg)
-    _brent_pct = parse_pct(brent_chg)
-    _oil_pct = None
-    if _wti_pct is not None and _brent_pct is not None:
-        _oil_pct = (_wti_pct + _brent_pct) / 2
-    elif _wti_pct is not None:
-        _oil_pct = _wti_pct
-    elif _brent_pct is not None:
-        _oil_pct = _brent_pct
+    # 모멘텀 입력은 yfinance 일봉 간 %변동 사용 — 실시간 슬라이딩 %change는 세션 마감
+    # 후에도 값이 계속 바뀌어 daily_review 스냅샷과 dashboard/scouter 점수가 어긋남.
+    _wti_daily = _yf_daily_pct("CL=F")
+    _brent_daily = _yf_daily_pct("BZ=F")
+    if _wti_daily is not None and _brent_daily is not None:
+        _oil_pct = (_wti_daily + _brent_daily) / 2
+    elif _wti_daily is not None:
+        _oil_pct = _wti_daily
+    elif _brent_daily is not None:
+        _oil_pct = _brent_daily
+    else:
+        _oil_pct = None
     c_risk_label, c_risk_color, c_risk_score = compute_c_risk_index(
         wti_val, brent_val, gold_val, copper_val,
         oil_chg=_oil_pct,
-        gold_chg=parse_pct(gold_chg),
-        silver_chg=parse_pct(silver_chg),
-        copper_chg=parse_pct(copper_chg),
-        btc_chg=parse_pct(btc_chg),
+        gold_chg=_yf_daily_pct("GC=F"),
+        silver_chg=_yf_daily_pct("SI=F"),
+        copper_chg=_yf_daily_pct("HG=F"),
+        btc_chg=_yf_daily_pct("BTC-USD"),
     )
     vix_val = parse_price(vix_price)
     vix_risk, vix_color = assess_risk("VIX", vix_val)
