@@ -1,7 +1,8 @@
 name: Daily Review - Korea
 on:
   schedule:
-    - cron: "17 7 * * 1-5"  # 16:17 KST (07:17 UTC) · 월~금 — 정각 혼잡 회피
+    - cron: "17 7 * * 1-5"  # 16:17 KST (07:17 UTC) · 월~금 — 1차
+    - cron: "17 9 * * 1-5"  # 18:17 KST (09:17 UTC) · 월~금 — GH cron 누락 대비 2차 (idempotent)
   workflow_dispatch:
 
 concurrency:
@@ -25,7 +26,7 @@ jobs:
       - uses: ./.github/actions/setup
 
       - name: Run daily review (korea)
-        run: python daily_review.py --korea-only
+        run: python daily_review.py --korea-only --skip-if-done
 
       - name: Commit-back state files
         run: |

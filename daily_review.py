@@ -1871,6 +1871,7 @@ def main():
     # 명령줄 인자 처리
     global_only = "--global-only" in sys.argv
     korea_only = "--korea-only" in sys.argv
+    skip_if_done = "--skip-if-done" in sys.argv
 
     # --date YYMMDD 옵션: 특정 날짜 시트에 작성
     today = datetime.now()
@@ -1884,6 +1885,34 @@ def main():
 
     mode = "글로벌만" if global_only else ("국장만" if korea_only else "글로벌+국장")
     print(f"=== {sheet_name} 생성 시작 ({mode}) ===\n")
+
+    # --skip-if-done: 이미 오늘 시트에 해당 워크시트가 작성돼 있으면 스킵
+    # (GitHub Actions cron 지연/누락 대비 이중 스케줄 용)
+    if skip_if_done:
+        try:
+            q = f"name='{sheet_name}' and '{FOLDER_ID}' in parents and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false"
+            existing = drive.files().list(q=q, fields="files(id, name)").execute().get("files", [])
+            if existing:
+                sh_prev = gc.open_by_key(existing[0]["id"])
+                titles = {ws.title for ws in sh_prev.worksheets()}
+                required = []
+                if not korea_only:
+                    required.append("글로벌")
+                if not global_only:
+                    required.append("국장")
+                all_done = True
+                for t in required:
+                    if t not in titles:
+                        all_done = False
+                        break
+                    if not sh_prev.worksheet(t).acell("A1").value:
+                        all_done = False
+                        break
+                if all_done:
+                    print(f"  → 이미 '{sheet_name}' 시트의 {'/'.join(required)} 탭이 작성됨 → 스킵")
+                    return
+        except Exception as e:
+            print(f"  (skip-if-done 체크 실패, 정상 진행: {e})")
 
     # 전일 날짜 (미국 증시 기준 — 글로벌 시트용)
     yesterday = today - timedelta(days=1)
