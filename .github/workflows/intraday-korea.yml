@@ -22,7 +22,7 @@ jobs:
       GSHEET_FOLDER_ID: ${{ secrets.GSHEET_FOLDER_ID }}
       RULES_DEPLOY_KEY: ${{ secrets.RULES_DEPLOY_KEY }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: ./.github/actions/setup
 
       - name: Intraday scan (korea)

@@ -3,7 +3,7 @@ description: Checkout code, pull private rules repo, install deps, inject SA cre
 runs:
   using: composite
   steps:
-    - uses: actions/setup-python@v5
+    - uses: actions/setup-python@v6
       with:
         python-version: "3.12"
         cache: pip
@@ -13,7 +13,7 @@ runs:
       run: pip install -r requirements.txt
 
     - name: Setup SSH for rules repo
-      uses: webfactory/ssh-agent@v0.9.0
+      uses: webfactory/ssh-agent@v0.10.0
       with:
         ssh-private-key: ${{ env.RULES_DEPLOY_KEY }}
 
