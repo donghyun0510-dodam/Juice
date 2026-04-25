@@ -48,36 +48,44 @@ FLAG_TITLE_MAP = {
 WEEKDAY_KR = ["월", "화", "수", "목", "금", "토", "일"]
 
 
-def fetch_weekly_events(date_from, date_to):
-    """investing.com에서 dateFrom~dateTo 사이 5개국 3성 이벤트 조회."""
-    print(f"  investing.com: {date_from} ~ {date_to} 5개국 3성 이벤트 조회...")
+def _fetch_country(date_from, date_to, country_code):
+    """단일 국가에 대해 investing.com 캘린더 호출 후 HTML 반환."""
     url = "https://kr.investing.com/economic-calendar/Service/getCalendarFilteredData"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         "X-Requested-With": "XMLHttpRequest",
         "Referer": "https://kr.investing.com/economic-calendar/",
     }
-    payload = [
-        ("dateFrom", date_from.strftime("%Y-%m-%d")),
-        ("dateTo", date_to.strftime("%Y-%m-%d")),
-        ("timeZone", "88"),  # 88 = Asia/Seoul (KST)
-        ("timeFilter", "timeRemain"),
-        ("currentTab", "custom"),
-        ("limit_from", "0"),
-    ]
-    for code in COUNTRY_CODES.keys():
-        payload.append(("country[]", code))
-    payload.append(("importance[]", "3"))
-
+    payload = {
+        "dateFrom": date_from.strftime("%Y-%m-%d"),
+        "dateTo": date_to.strftime("%Y-%m-%d"),
+        "country[]": country_code,
+        "importance[]": "3",
+    }
     try:
         resp = req.post(url, headers=headers, data=payload, timeout=20)
         data = resp.json()
-        html = data.get("data", "")
+        return data.get("data", "")
     except Exception as e:
-        print(f"    investing.com 호출 실패: {e}")
-        return []
+        print(f"    investing.com 호출 실패 (country={country_code}): {e} / 응답 일부: {resp.text[:200] if 'resp' in dir() else ''}")
+        return ""
 
-    soup = BeautifulSoup(html, "html.parser")
+
+def fetch_weekly_events(date_from, date_to):
+    """investing.com에서 dateFrom~dateTo 사이 5개국 3성 이벤트 조회 (국가별 순차 호출)."""
+    print(f"  investing.com: {date_from.date()} ~ {date_to.date()} 5개국 3성 이벤트 조회...")
+
+    all_html = []
+    for code, label in COUNTRY_CODES.items():
+        html = _fetch_country(date_from, date_to, code)
+        rows_count = html.count('js-event-item') if html else 0
+        print(f"    {label}({code}): {rows_count}건")
+        if html:
+            all_html.append(html)
+        time.sleep(1)  # rate limit 회피
+
+    combined_html = "".join(all_html)
+    soup = BeautifulSoup(combined_html, "html.parser")
     rows = soup.find_all("tr", class_="js-event-item")
 
     events = []
@@ -169,11 +177,11 @@ def main():
     print(f"대상 기간: {upcoming_monday.strftime('%Y-%m-%d (%a)')} ~ {upcoming_sunday.strftime('%Y-%m-%d (%a)')}")
 
     events = fetch_weekly_events(upcoming_monday, upcoming_sunday)
-    if not events:
-        print("수집된 이벤트 없음 — 시트 생성 스킵")
-        return
-
     rows = build_rows(events)
+    if not events:
+        print("3성급 이벤트 0건 — placeholder 시트 생성")
+        rows.append(["", "", "", "", "이번 주 3성급 이벤트 없음", "", ""])
+
     title = f"주간 경제일정_{upcoming_monday.strftime('%y%m%d')}"
 
     creds = get_credentials()
