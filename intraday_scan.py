@@ -36,7 +36,7 @@ def run(market: str) -> int:
         return 0
 
     print(f"[{market}] {len(tickers)}개 종목 스캔 중…")
-    current = analyze_trend_signals(tickers)
+    current = analyze_trend_signals(tickers, enrich_realtime=(market == "global"))
     if not current:
         print("신호 계산 실패")
         return 1

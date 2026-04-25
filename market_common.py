@@ -7,6 +7,7 @@ daily_review.py, market_dashboard.py 양쪽에서 공유하는 단일 진실 원
 
 import yfinance as yf
 import pandas as pd
+import requests as req
 import json
 import os
 from datetime import datetime
@@ -245,14 +246,51 @@ def classify_signal(close: pd.Series) -> dict:
     }
 
 
-def analyze_trend_signals(tickers: list) -> dict:
-    """다수 종목 일괄 분석. yfinance batch download 사용."""
+def _finnhub_quote(symbol: str, api_key: str) -> float | None:
+    """Finnhub /quote — 미국 주식·ETF 실시간 현재가 c. 실패 시 None."""
+    try:
+        resp = req.get(
+            "https://finnhub.io/api/v1/quote",
+            params={"symbol": symbol, "token": api_key},
+            timeout=8,
+        )
+        if resp.status_code != 200:
+            return None
+        c = resp.json().get("c")
+        return float(c) if c and c > 0 else None
+    except Exception:
+        return None
+
+
+def _enrich_realtime(close: pd.Series, symbol: str, api_key: str) -> pd.Series:
+    """미국 종목이면 Finnhub quote의 c로 마지막 종가를 덮어쓰기 (장중 가격 반영).
+    한국 종목(.KS/.KQ)은 그대로 반환."""
+    if symbol.endswith(".KS") or symbol.endswith(".KQ"):
+        return close
+    c = _finnhub_quote(symbol, api_key)
+    if c is None:
+        return close
+    close = close.copy()
+    close.iloc[-1] = c
+    return close
+
+
+def analyze_trend_signals(tickers: list, enrich_realtime: bool = False) -> dict:
+    """다수 종목 일괄 분석. yfinance batch download 사용.
+
+    enrich_realtime=True 시 FINNHUB_API_KEY 가 있으면 미국 종목의 마지막 종가를
+    Finnhub /quote 의 현재가로 갱신해 장중 가격 변동을 신호 분류에 반영.
+    """
     if not tickers:
         return {}
     try:
         data = yf.download(tickers, period="1y", auto_adjust=True, progress=False, group_by="ticker")
     except Exception:
         return {}
+
+    api_key = os.environ.get("FINNHUB_API_KEY") if enrich_realtime else None
+    enriched_count = 0
+
     results = {}
     for t in tickers:
         try:
@@ -260,11 +298,19 @@ def analyze_trend_signals(tickers: list) -> dict:
                 close = data["Close"].dropna()
             else:
                 close = data[t]["Close"].dropna()
+            if api_key:
+                before = float(close.iloc[-1]) if len(close) else None
+                close = _enrich_realtime(close, t, api_key)
+                if before is not None and float(close.iloc[-1]) != before:
+                    enriched_count += 1
             r = classify_signal(close)
             if r is not None:
                 results[t] = r
         except Exception:
             continue
+
+    if api_key:
+        print(f"[finnhub] 실시간 가격 보강 {enriched_count}/{len(tickers)} 종목", flush=True)
     return results
 
 
