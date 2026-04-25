@@ -2327,8 +2327,9 @@ def manage_kr_promotions(kr_long_map, name_map):
 
 _newly_promoted = manage_kr_promotions(kr_longs, kr_name_map)
 if _newly_promoted:
-    names = ", ".join(info.get("name", t) for t, info in _newly_promoted.items())
-    st.success(f"🆕 추적 리스트 편입 ({len(_newly_promoted)}개): {names} — 다음 재실행부터 반영")
+    with st.expander(f"🆕 추적 리스트 편입 ({len(_newly_promoted)}개) — 다음 재실행부터 반영", expanded=False):
+        for _t, _info in _newly_promoted.items():
+            st.markdown(f"- **{_info.get('name', _t)}** (`{_t}`)")
 
 # 10분 자동 갱신 기준으로 신규 등장 Long sign 종목 탐지
 # 저장 갱신은 9분 이상 경과 시에만 수행 → 자동새로고침 주기 동안 NEW 배지 유지
