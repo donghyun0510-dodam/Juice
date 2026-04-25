@@ -1230,7 +1230,7 @@ st.markdown(f"""
         font-size: 13px; color: {TEXT_SECONDARY}; letter-spacing: 2px;
         text-transform: uppercase; font-weight: 600;
         border-bottom: 1px solid {CARD_BORDER}; padding-bottom: 8px;
-        margin: 24px 0 16px 0;
+        margin: 40px 0 18px 0;
     }}
 
     /* 모바일 반응형 */
@@ -1256,7 +1256,7 @@ st.markdown(f"""
         .idx-card {{ padding: 10px 6px; }}
         .idx-card .idx-val {{ font-size: 14px; }}
         .idx-card .idx-name {{ font-size: 13px; letter-spacing: 0.3px; }}
-        .section-title {{ font-size: 12px; margin: 16px 0 10px 0; letter-spacing: 1px; }}
+        .section-title {{ font-size: 12px; margin: 28px 0 12px 0; letter-spacing: 1px; }}
         .diagnosis-box, .strategy-box {{ padding: 12px 14px; font-size: 13px; }}
         .header-bar h1 {{ font-size: 20px !important; }}
         .header-bar .ts {{ font-size: 10px !important; }}
