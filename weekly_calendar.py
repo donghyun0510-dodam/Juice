@@ -1,9 +1,9 @@
 """
 주간 경제 캘린더 자동 정리 스크립트.
 
-매주 일요일 실행. ForexFactory가 제공하는 공식 JSON 엔드포인트
-(nfs.faireconomy.media/ff_calendar_*.json) 에서 다가오는 주(다음 월~일)
-미국/유럽/중국/일본/한국 High-impact(=3성) 이벤트만 수집하여
+매주 일요일 실행. Trading Economics guest API
+(api.tradingeconomics.com/calendar) 에서 다가오는 주(다음 월~일)
+미국/유럽/중국/일본/한국 importance=3 이벤트만 수집하여
 구글 드라이브 `주식리뷰` 폴더에 '주간 경제일정_YYMMDD' 스프레드시트로 저장.
 
 컬럼: 날짜 | 요일 | 시간(KST) | 국가 | 지표명 | 예상 | 이전
@@ -27,66 +27,80 @@ FOLDER_ID = os.environ.get("GSHEET_FOLDER_ID", "1oCzJUMAklZwXqBR67CmvzmFdZGg3wLu
 
 KST = timezone(timedelta(hours=9))
 
-# ForexFactory currency 코드 → 국가명
+# Trading Economics country 명칭 → 표시 국가명
 COUNTRY_MAP = {
-    "USD": "미국",
-    "EUR": "유럽",
-    "CNY": "중국",
-    "JPY": "일본",
-    "KRW": "한국",
+    "United States": "미국",
+    "Euro Area": "유럽",
+    "China": "중국",
+    "Japan": "일본",
+    "South Korea": "한국",
 }
 
 WEEKDAY_KR = ["월", "화", "수", "목", "금", "토", "일"]
 
-FF_THISWEEK = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
-FF_NEXTWEEK = "https://nfs.faireconomy.media/ff_calendar_nextweek.json"
-
-
-def _fetch(url):
-    headers = {"User-Agent": "Mozilla/5.0"}
-    resp = req.get(url, headers=headers, timeout=20)
-    resp.raise_for_status()
-    return resp.json()
+TE_BASE = "https://api.tradingeconomics.com/calendar/country"
 
 
 def fetch_weekly_events(date_from, date_to):
-    """ForexFactory JSON 두 엔드포인트(thisweek+nextweek) 모두 가져와 KST 기준
-    date_from~date_to(포함) 범위 + 5개국 + High impact 만 필터링."""
-    print(f"  ForexFactory: {date_from.date()} ~ {date_to.date()} 5개국 High-impact 이벤트 조회...")
+    """Trading Economics guest API에서 dateFrom~dateTo + 5개국 + importance=3 조회.
+    Date 필드는 UTC naive 로 가정하고 KST 변환."""
+    countries = ",".join(COUNTRY_MAP.keys()).replace(" ", "%20")
+    url = (
+        f"{TE_BASE}/{countries}"
+        f"?c=guest:guest"
+        f"&d1={date_from.strftime('%Y-%m-%d')}"
+        f"&d2={date_to.strftime('%Y-%m-%d')}"
+        f"&importance=3"
+        f"&format=json"
+    )
+    print(f"  Trading Economics: {date_from.date()} ~ {date_to.date()} 5개국 importance=3 이벤트 조회...")
 
-    raw = []
-    for url in (FF_THISWEEK, FF_NEXTWEEK):
-        try:
-            data = _fetch(url)
-            print(f"    {url.rsplit('/', 1)[-1]}: 전체 {len(data)}건")
-            raw.extend(data)
-        except Exception as e:
-            print(f"    {url} 호출 실패: {e}")
-
-    if not raw:
+    headers = {"User-Agent": "Mozilla/5.0"}
+    try:
+        resp = req.get(url, headers=headers, timeout=20)
+        resp.raise_for_status()
+        raw = resp.json()
+    except Exception as e:
+        body = locals().get("resp")
+        body_text = body.text[:200] if body is not None else ""
+        print(f"    호출 실패: {e} / 응답: {body_text}")
         return []
+
+    print(f"    전체 {len(raw)}건")
 
     range_start = datetime.combine(date_from.date(), datetime.min.time(), tzinfo=KST)
     range_end = datetime.combine(date_to.date(), datetime.max.time(), tzinfo=KST)
 
     events = []
-    seen = set()  # (datetime, country, title) 중복 제거
+    seen = set()
     for item in raw:
-        if item.get("impact") != "High":
-            continue
-        country_code = item.get("country", "")
-        if country_code not in COUNTRY_MAP:
+        country = COUNTRY_MAP.get(item.get("Country", "").strip())
+        if not country:
             continue
 
-        try:
-            dt = datetime.fromisoformat(item["date"]).astimezone(KST)
-        except (ValueError, KeyError, TypeError):
+        date_str = (item.get("Date") or "").strip()
+        if not date_str:
             continue
+        # "2026-04-30T18:00:00" (UTC naive) — Z 또는 offset 가능성 모두 처리
+        try:
+            if date_str.endswith("Z"):
+                dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+            elif "+" in date_str[10:] or "-" in date_str[10:]:
+                dt = datetime.fromisoformat(date_str)
+            else:
+                dt = datetime.fromisoformat(date_str).replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+        dt = dt.astimezone(KST)
 
         if not (range_start <= dt <= range_end):
             continue
 
-        key = (dt.isoformat(), country_code, item.get("title", ""))
+        name = (item.get("Event") or item.get("Category") or "").strip()
+        forecast = (item.get("Forecast") or item.get("TEForecast") or "").strip()
+        previous = (item.get("Previous") or "").strip()
+
+        key = (dt.isoformat(), country, name)
         if key in seen:
             continue
         seen.add(key)
@@ -95,11 +109,11 @@ def fetch_weekly_events(date_from, date_to):
             "datetime": dt,
             "date": dt.strftime("%Y-%m-%d"),
             "weekday": WEEKDAY_KR[dt.weekday()],
-            "time": dt.strftime("%H:%M"),
-            "country": COUNTRY_MAP[country_code],
-            "name": item.get("title", "").strip(),
-            "forecast": (item.get("forecast") or "").strip(),
-            "previous": (item.get("previous") or "").strip(),
+            "time": dt.strftime("%H:%M") if dt.hour or dt.minute else "종일",
+            "country": country,
+            "name": name,
+            "forecast": forecast,
+            "previous": previous,
         })
 
     events.sort(key=lambda e: e["datetime"])
