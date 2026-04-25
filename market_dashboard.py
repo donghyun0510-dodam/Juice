@@ -1562,6 +1562,88 @@ strategies = generate_strategy(total)
 strat_items = "".join([f"<li>{s}</li>" for s in strategies])
 st.markdown(f'<div class="strategy-box"><ul style="padding:0;margin:0;">{strat_items}</ul></div>', unsafe_allow_html=True)
 
+
+# ── 오늘의 일정 (주간 경제일정 시트에서 당일 row 추출) ──
+@st.cache_data(ttl=1800)
+def fetch_today_events():
+    """주식리뷰 폴더에서 가장 최근 '주간 경제일정_*' 시트의 오늘 row만 반환.
+    Returns: (sheet_name | None, list[list[str]] today_rows)."""
+    try:
+        from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+        import gspread
+        from googleapiclient.discovery import build
+        from sheet_auth import get_credentials
+        import os as _os
+
+        kst = _tz(_td(hours=9))
+        today_str = _dt.now(kst).strftime("%Y-%m-%d")
+        folder_id = _os.environ.get("GSHEET_FOLDER_ID", "1oCzJUMAklZwXqBR67CmvzmFdZGg3wLuv")
+
+        creds = get_credentials()
+        gc = gspread.authorize(creds)
+        drive = build("drive", "v3", credentials=creds)
+
+        q = (f"name contains '주간 경제일정_' and '{folder_id}' in parents "
+             f"and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false")
+        results = drive.files().list(q=q, orderBy="name desc", pageSize=10, fields="files(id,name)").execute()
+        files = results.get("files", [])
+        if not files:
+            return None, []
+
+        latest = files[0]
+        sh = gc.open_by_key(latest["id"])
+        ws = sh.sheet1
+        rows = ws.get_all_values()
+        if not rows or len(rows) < 2:
+            return latest["name"], []
+
+        # 헤더: 날짜 | 요일 | 시간(KST) | 국가 | 지표명 | 예상 | 이전
+        today_rows = [r for r in rows[1:] if r and r[0] == today_str]
+        return latest["name"], today_rows
+    except Exception as e:
+        print(f"[today_events] fetch fail: {e}", flush=True)
+        return None, []
+
+
+st.markdown('<p class="section-title">오늘의 일정</p>', unsafe_allow_html=True)
+_sheet_name, _today_events = fetch_today_events()
+
+if not _today_events:
+    _msg = ("오늘 예정된 주요 경제일정이 없습니다."
+            if _sheet_name else
+            "주간 경제일정 시트를 찾을 수 없습니다 (일요일 06:00 KST 자동 생성).")
+    st.markdown(
+        f'<div class="diagnosis-box" style="color:{TEXT_SECONDARY};">{_msg}</div>',
+        unsafe_allow_html=True,
+    )
+else:
+    _items_html = ""
+    for _r in _today_events:
+        _time = _r[2] if len(_r) > 2 else ""
+        _country = _r[3] if len(_r) > 3 else ""
+        _name = _r[4] if len(_r) > 4 else ""
+        _fcst = _r[5] if len(_r) > 5 else ""
+        _prev = _r[6] if len(_r) > 6 else ""
+        _details = []
+        if _fcst:
+            _details.append(f"예상 {_fcst}")
+        if _prev:
+            _details.append(f"이전 {_prev}")
+        _detail_str = " · ".join(_details)
+        _items_html += (
+            f'<li style="margin-bottom:6px;">'
+            f'<span style="color:{ACCENT_GOLD};font-family:Consolas,monospace;font-weight:600;">{_time}</span> '
+            f'<span style="color:{TEXT_SECONDARY};font-size:0.9em;">[{_country}]</span> '
+            f'<strong>{_name}</strong>'
+            + (f' <span style="color:#888;font-size:0.85em;">— {_detail_str}</span>' if _detail_str else '')
+            + '</li>'
+        )
+    st.markdown(
+        f'<div class="diagnosis-box"><ul style="padding-left:1.2em;margin:0;">{_items_html}</ul></div>',
+        unsafe_allow_html=True,
+    )
+
+
 # ── 개별주식 1 - 기존 추적 종목 추세 신호 ──
 st.markdown('<p class="section-title">개별 주식 1 — 추세 신호 (추적 종목)</p>', unsafe_allow_html=True)
 
