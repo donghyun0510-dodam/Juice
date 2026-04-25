@@ -10,6 +10,7 @@ import pandas as pd
 import requests as req
 import json
 import os
+import time as _time
 from datetime import datetime
 
 
@@ -246,8 +247,8 @@ def classify_signal(close: pd.Series) -> dict:
     }
 
 
-def _finnhub_quote(symbol: str, api_key: str) -> float | None:
-    """Finnhub /quote — 미국 주식·ETF 실시간 현재가 c. 실패 시 None."""
+def _finnhub_quote(symbol: str, api_key: str) -> tuple[float | None, int]:
+    """Finnhub /quote — 미국 주식·ETF 실시간 현재가 c. (price, status_code) 반환."""
     try:
         resp = req.get(
             "https://finnhub.io/api/v1/quote",
@@ -255,24 +256,32 @@ def _finnhub_quote(symbol: str, api_key: str) -> float | None:
             timeout=8,
         )
         if resp.status_code != 200:
-            return None
+            return None, resp.status_code
         c = resp.json().get("c")
-        return float(c) if c and c > 0 else None
+        return (float(c) if c and c > 0 else None), 200
     except Exception:
-        return None
+        return None, 0
 
 
-def _enrich_realtime(close: pd.Series, symbol: str, api_key: str) -> pd.Series:
-    """미국 종목이면 Finnhub quote의 c로 마지막 종가를 덮어쓰기 (장중 가격 반영).
-    한국 종목(.KS/.KQ)은 그대로 반환."""
+# Finnhub 무료 tier = 60 calls/min. 1.05s 간격이면 균등 분포로 안전.
+_FINNHUB_THROTTLE_SEC = 1.05
+
+
+def _enrich_realtime(close: pd.Series, symbol: str, api_key: str) -> tuple[pd.Series, str]:
+    """미국 종목만 Finnhub quote 의 c 로 마지막 종가 갱신.
+    Returns: (close, status) — status ∈ {'skipped_kr', 'enriched', 'no_data', 'rate_limited', 'http_err'}.
+    한국 종목(.KS/.KQ)은 호출 없이 skip."""
     if symbol.endswith(".KS") or symbol.endswith(".KQ"):
-        return close
-    c = _finnhub_quote(symbol, api_key)
+        return close, "skipped_kr"
+    c, status_code = _finnhub_quote(symbol, api_key)
+    _time.sleep(_FINNHUB_THROTTLE_SEC)  # rate limit 회피 (한국 종목 제외 후에만 throttle)
+    if status_code == 429:
+        return close, "rate_limited"
     if c is None:
-        return close
+        return close, "no_data" if status_code == 200 else "http_err"
     close = close.copy()
     close.iloc[-1] = c
-    return close
+    return close, "enriched"
 
 
 def analyze_trend_signals(tickers: list, enrich_realtime: bool = False) -> dict:
@@ -289,7 +298,7 @@ def analyze_trend_signals(tickers: list, enrich_realtime: bool = False) -> dict:
         return {}
 
     api_key = os.environ.get("FINNHUB_API_KEY") if enrich_realtime else None
-    enriched_count = 0
+    status_counts = {"enriched": 0, "skipped_kr": 0, "no_data": 0, "rate_limited": 0, "http_err": 0}
 
     results = {}
     for t in tickers:
@@ -299,10 +308,8 @@ def analyze_trend_signals(tickers: list, enrich_realtime: bool = False) -> dict:
             else:
                 close = data[t]["Close"].dropna()
             if api_key:
-                before = float(close.iloc[-1]) if len(close) else None
-                close = _enrich_realtime(close, t, api_key)
-                if before is not None and float(close.iloc[-1]) != before:
-                    enriched_count += 1
+                close, status = _enrich_realtime(close, t, api_key)
+                status_counts[status] = status_counts.get(status, 0) + 1
             r = classify_signal(close)
             if r is not None:
                 results[t] = r
@@ -310,7 +317,12 @@ def analyze_trend_signals(tickers: list, enrich_realtime: bool = False) -> dict:
             continue
 
     if api_key:
-        print(f"[finnhub] 실시간 가격 보강 {enriched_count}/{len(tickers)} 종목", flush=True)
+        print(
+            f"[finnhub] 보강 {status_counts['enriched']} / KR스킵 {status_counts['skipped_kr']} / "
+            f"데이터없음 {status_counts['no_data']} / 429 {status_counts['rate_limited']} / "
+            f"HTTP에러 {status_counts['http_err']}",
+            flush=True,
+        )
     return results
 
 
