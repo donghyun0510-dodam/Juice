@@ -1,12 +1,14 @@
 """
 주간 경제 캘린더 자동 정리 스크립트.
 
-매주 일요일 실행. Trading Economics guest API
-(api.tradingeconomics.com/calendar) 에서 다가오는 주(다음 월~일)
-미국/유럽/중국/일본/한국 importance=3 이벤트만 수집하여
+매주 일요일 실행. Finnhub economic calendar API
+(finnhub.io/api/v1/calendar/economic) 에서 다가오는 주(다음 월~일)
+미국/유럽/중국/일본/한국 high impact 이벤트만 수집하여
 구글 드라이브 `주식리뷰` 폴더에 '주간 경제일정_YYMMDD' 스프레드시트로 저장.
 
 컬럼: 날짜 | 요일 | 시간(KST) | 국가 | 지표명 | 예상 | 이전
+
+환경변수 FINNHUB_API_KEY 필수.
 """
 
 import os
@@ -27,42 +29,42 @@ FOLDER_ID = os.environ.get("GSHEET_FOLDER_ID", "1oCzJUMAklZwXqBR67CmvzmFdZGg3wLu
 
 KST = timezone(timedelta(hours=9))
 
-# Trading Economics country 명칭 → 표시 국가명
+# Finnhub country 코드 (ISO Alpha-2) → 표시 국가명
 COUNTRY_MAP = {
-    "United States": "미국",
-    "Euro Area": "유럽",
-    "China": "중국",
-    "Japan": "일본",
-    "South Korea": "한국",
+    "US": "미국",
+    "EU": "유럽",
+    "CN": "중국",
+    "JP": "일본",
+    "KR": "한국",
 }
 
 WEEKDAY_KR = ["월", "화", "수", "목", "금", "토", "일"]
 
-TE_BASE = "https://api.tradingeconomics.com/calendar/country"
+FINNHUB_URL = "https://finnhub.io/api/v1/calendar/economic"
 
 
 def fetch_weekly_events(date_from, date_to):
-    """Trading Economics guest API에서 dateFrom~dateTo + 5개국 + importance=3 조회.
-    Date 필드는 UTC naive 로 가정하고 KST 변환."""
-    countries = ",".join(COUNTRY_MAP.keys()).replace(" ", "%20")
-    url = (
-        f"{TE_BASE}/{countries}"
-        f"?c=guest:guest"
-        f"&d1={date_from.strftime('%Y-%m-%d')}"
-        f"&d2={date_to.strftime('%Y-%m-%d')}"
-        f"&importance=3"
-        f"&format=json"
-    )
-    print(f"  Trading Economics: {date_from.date()} ~ {date_to.date()} 5개국 importance=3 이벤트 조회...")
+    """Finnhub economic calendar API에서 dateFrom~dateTo 범위 조회 후
+    5개국 + impact=high 만 필터링. Time 필드는 UTC naive."""
+    api_key = os.environ.get("FINNHUB_API_KEY")
+    if not api_key:
+        raise RuntimeError("FINNHUB_API_KEY 환경변수 미설정")
 
-    headers = {"User-Agent": "Mozilla/5.0"}
+    params = {
+        "from": date_from.strftime("%Y-%m-%d"),
+        "to": date_to.strftime("%Y-%m-%d"),
+        "token": api_key,
+    }
+    print(f"  Finnhub: {date_from.date()} ~ {date_to.date()} 경제 캘린더 조회...")
+
+    resp = None
     try:
-        resp = req.get(url, headers=headers, timeout=20)
+        resp = req.get(FINNHUB_URL, params=params, timeout=20)
         resp.raise_for_status()
-        raw = resp.json()
+        data = resp.json()
+        raw = data.get("economicCalendar", []) or []
     except Exception as e:
-        body = locals().get("resp")
-        body_text = body.text[:200] if body is not None else ""
+        body_text = resp.text[:300] if resp is not None else ""
         print(f"    호출 실패: {e} / 응답: {body_text}")
         return []
 
@@ -74,31 +76,39 @@ def fetch_weekly_events(date_from, date_to):
     events = []
     seen = set()
     for item in raw:
-        country = COUNTRY_MAP.get(item.get("Country", "").strip())
+        if (item.get("impact") or "").lower() != "high":
+            continue
+        country = COUNTRY_MAP.get((item.get("country") or "").strip().upper())
         if not country:
             continue
 
-        date_str = (item.get("Date") or "").strip()
-        if not date_str:
+        time_str = (item.get("time") or "").strip()
+        if not time_str:
             continue
-        # "2026-04-30T18:00:00" (UTC naive) — Z 또는 offset 가능성 모두 처리
         try:
-            if date_str.endswith("Z"):
-                dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
-            elif "+" in date_str[10:] or "-" in date_str[10:]:
-                dt = datetime.fromisoformat(date_str)
-            else:
-                dt = datetime.fromisoformat(date_str).replace(tzinfo=timezone.utc)
+            dt = datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
         except ValueError:
-            continue
+            try:
+                dt = datetime.fromisoformat(time_str.replace("Z", "+00:00"))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+            except ValueError:
+                continue
         dt = dt.astimezone(KST)
 
         if not (range_start <= dt <= range_end):
             continue
 
-        name = (item.get("Event") or item.get("Category") or "").strip()
-        forecast = (item.get("Forecast") or item.get("TEForecast") or "").strip()
-        previous = (item.get("Previous") or "").strip()
+        name = (item.get("event") or "").strip()
+        unit = (item.get("unit") or "").strip()
+
+        def _fmt(v):
+            if v is None or v == "":
+                return ""
+            return f"{v}{unit}" if unit else str(v)
+
+        forecast = _fmt(item.get("estimate"))
+        previous = _fmt(item.get("prev"))
 
         key = (dt.isoformat(), country, name)
         if key in seen:
