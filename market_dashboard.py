@@ -1964,7 +1964,7 @@ SIGNAL_CHANGES = detect_changes(sig, BASELINE_SIGNALS)  # {ticker: (before, afte
 # 장중 변화 요약 섹션 (개별 주식 1 체크포인트 위에 노출)
 if SIGNAL_CHANGES:
     st.markdown('<p class="section-title">🔔 장중 신호 변화</p>', unsafe_allow_html=True)
-    with st.expander(f"아침 리뷰 대비 신호 변화 — {len(SIGNAL_CHANGES)}개 종목", expanded=False):
+    with st.expander(f"⚠️ 아침 리뷰 대비 신호 변화 — {len(SIGNAL_CHANGES)}개 종목", expanded=False):
         for t, (before, after) in SIGNAL_CHANGES.items():
             name = TICKER_NAMES.get(t, t)
             before_kr = SIGNAL_LABEL_KR.get(before, before)
@@ -2329,7 +2329,11 @@ _newly_promoted = manage_kr_promotions(kr_longs, kr_name_map)
 if _newly_promoted:
     with st.expander(f"🆕 추적 리스트 편입 ({len(_newly_promoted)}개) — 다음 재실행부터 반영", expanded=False):
         for _t, _info in _newly_promoted.items():
-            st.markdown(f"- **{_info.get('name', _t)}** (`{_t}`)")
+            st.markdown(
+                f"- **{_info.get('name', _t)}** "
+                f"<span style='color:{TEXT_SECONDARY};font-size:0.9em;'>({_t})</span>",
+                unsafe_allow_html=True,
+            )
 
 # 10분 자동 갱신 기준으로 신규 등장 Long sign 종목 탐지
 # 저장 갱신은 9분 이상 경과 시에만 수행 → 자동새로고침 주기 동안 NEW 배지 유지
