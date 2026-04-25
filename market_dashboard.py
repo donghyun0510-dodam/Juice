@@ -1230,12 +1230,12 @@ st.markdown(f"""
         font-size: 13px; color: {TEXT_SECONDARY}; letter-spacing: 2px;
         text-transform: uppercase; font-weight: 600;
         border-bottom: 1px solid {CARD_BORDER}; padding-bottom: 8px;
-        margin: 40px 0 18px 0 !important;
+        margin: 20px 0 14px 0 !important;
     }}
     /* Streamlit element-container도 함께 띄움 (gap: 1rem 기본값 보정) */
     [data-testid="stMarkdownContainer"]:has(> .section-title),
     [data-testid="element-container"]:has(.section-title) {{
-        margin-top: 24px !important;
+        margin-top: 12px !important;
     }}
 
     /* 모바일 반응형 */
@@ -1261,9 +1261,9 @@ st.markdown(f"""
         .idx-card {{ padding: 10px 6px; }}
         .idx-card .idx-val {{ font-size: 14px; }}
         .idx-card .idx-name {{ font-size: 13px; letter-spacing: 0.3px; }}
-        .section-title {{ font-size: 12px; margin: 28px 0 12px 0 !important; letter-spacing: 1px; }}
+        .section-title {{ font-size: 12px; margin: 14px 0 10px 0 !important; letter-spacing: 1px; }}
         [data-testid="stMarkdownContainer"]:has(> .section-title),
-        [data-testid="element-container"]:has(.section-title) {{ margin-top: 16px !important; }}
+        [data-testid="element-container"]:has(.section-title) {{ margin-top: 8px !important; }}
         .diagnosis-box, .strategy-box {{ padding: 12px 14px; font-size: 13px; }}
         .header-bar h1 {{ font-size: 20px !important; }}
         .header-bar .ts {{ font-size: 10px !important; }}
