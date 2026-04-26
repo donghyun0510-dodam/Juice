@@ -211,9 +211,9 @@ def assess_risk(indicator, value):
     thresholds = {
         "VIX": (20, 25, 30),
         "DXY": (102, 105, 110),
-        "2Y":  (4.5, 4.8, 5.2),
-        "10Y": (4.2, 4.5, 4.8),
-        "30Y": (4.3, 4.6, 5.2),
+        "2Y":  (4.2, 4.5, 4.9),
+        "10Y": (3.9, 4.2, 4.5),
+        "30Y": (4.0, 4.3, 4.9),
         "WTI": (85, 95, 100),
         "BRN": (90, 100, 105),
         "USD/JPY": (145, 152, 158),
@@ -509,7 +509,7 @@ def compute_t_risk_index(bond_2y_val, bond_10y_val, bond_30y_val):
             spread_score = 0
 
     # 가중 합산
-    total = score_2y * 0.4 + score_10y * 0.3 + score_30y * 0.1 + spread_score * 0.2
+    total = score_2y * 0.3 + score_10y * 0.35 + score_30y * 0.15 + spread_score * 0.2
 
     # T-Risk는 0~30 스케일 → 100점 환산
     normalized = total * (100 / 30)
