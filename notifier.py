@@ -23,7 +23,7 @@ TIMESERIES_SHEET_NAME = "스카우터_매크로_타임시리즈"
 PERF_FOLDER_ID = os.environ.get("GSHEET_FOLDER_ID", "1oCzJUMAklZwXqBR67CmvzmFdZGg3wLuv")
 PERF_HEADERS = ["날짜", "T-RISK", "FX-RISK", "C-RISK", "VIX점수", "매크로종합",
                 "S&P500 종가", "S&P500 변동(%)", "구분"]
-TIMESERIES_INTERVAL_MIN = 60
+TIMESERIES_INTERVAL_MIN = 180
 STATE_SHEET_NAME = "스카우터_알림상태"
 
 
@@ -248,7 +248,7 @@ def _log_if_due(scores: dict, sheet_name: str, state_key: str) -> None:
         try:
             elapsed = (now - datetime.fromisoformat(last_ts)).total_seconds() / 60
             if elapsed < TIMESERIES_INTERVAL_MIN:
-                print(f"[notifier] {sheet_name}: 60분 가드 ({elapsed:.1f}분 경과) — 스킵", flush=True)
+                print(f"[notifier] {sheet_name}: {TIMESERIES_INTERVAL_MIN}분 가드 ({elapsed:.1f}분 경과) — 스킵", flush=True)
                 return
             print(f"[notifier] {sheet_name}: 가드 통과 ({elapsed:.1f}분 경과) — append 시도", flush=True)
         except Exception as e:
@@ -262,7 +262,7 @@ def _log_if_due(scores: dict, sheet_name: str, state_key: str) -> None:
 
 
 def log_timeseries_if_due(scores: dict) -> None:
-    """60분 간격으로 타임시리즈 시트에 전수 기록."""
+    """3시간 간격으로 타임시리즈 시트에 전수 기록."""
     _log_if_due(scores, TIMESERIES_SHEET_NAME, "last_timeseries_ts")
 
 

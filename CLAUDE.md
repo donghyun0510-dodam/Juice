@@ -64,7 +64,7 @@ python daily_review.py
 | `daily-korea.yml` | Daily Review - Korea | `0 7 * * 1-5` | 월~금 16:00 | `python daily_review.py --korea-only` |
 | `intraday-global.yml` | Intraday Scan - Global | `*/10 13-21 * * 1-5` | 월~금 22:30~06:00 10분 간격 | `python intraday_scan.py --market global` |
 | `intraday-korea.yml` | Intraday Scan - Korea | `*/10 0-6 * * 1-5` | 월~금 09:00~15:30 10분 간격 | `python intraday_scan.py --market korea` |
-| `scouter-timeseries.yml` | Scouter Timeseries & Performance | `17 * * * *` | 매시 17분 | `python scouter_logger.py` |
+| `scouter-timeseries.yml` | Scouter Timeseries & Performance | `17 */3 * * *` | 3시간 간격 17분 | `python scouter_logger.py` |
 
 ### 공통 구성
 - `concurrency.group: sheet-writer` — 시트 쓰기 워크플로우가 동시에 실행되지 않도록 직렬화
