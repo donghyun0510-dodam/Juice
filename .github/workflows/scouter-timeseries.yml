@@ -1,12 +1,13 @@
 name: Scouter Timeseries & Performance
 on:
   schedule:
-    # 3시간 간격 — 매 3시간 17분 (UTC). 정각 부근은 GH 부하로 스킵되기 쉬워 분산.
-    - cron: "17 */3 * * *"
+    # 일 1회 — UTC 월~금 20:17 = KST 화~토 05:17 (미국 종가 16:00 ET 직후).
+    # 정각 부근은 GH 부하로 스킵되기 쉬워 17분으로 분산.
+    - cron: "17 20 * * 1-5"
   workflow_dispatch:
     inputs:
       force_append:
-        description: "180분 가드 무시하고 강제 append (디버그)"
+        description: "일 1회 가드 무시하고 강제 append (디버그)"
         type: boolean
         default: false
 

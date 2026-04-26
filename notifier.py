@@ -22,8 +22,8 @@ GRADE_ORDER = ["안정", "주의", "위험", "고위험"]
 TIMESERIES_SHEET_NAME = "스카우터_매크로_타임시리즈"
 PERF_FOLDER_ID = os.environ.get("GSHEET_FOLDER_ID", "1oCzJUMAklZwXqBR67CmvzmFdZGg3wLuv")
 PERF_HEADERS = ["날짜", "T-RISK", "FX-RISK", "C-RISK", "VIX점수", "매크로종합",
-                "S&P500 종가", "S&P500 변동(%)", "구분"]
-TIMESERIES_INTERVAL_MIN = 180
+                "매크로종합 변동", "S&P500 종가", "S&P500 변동(%)", "구분"]
+TIMESERIES_INTERVAL_MIN = 1320  # 22h — 일 1회 (KST 05:00) 가드
 STATE_SHEET_NAME = "스카우터_알림상태"
 
 
@@ -193,19 +193,28 @@ def _append_row_to_sheet(sheet_name: str, scores: dict) -> bool:
 
         # 직전 로그 행의 S&P500 종가 대비 변동(%) — 매크로종합과의 상관분석용
         # 지수 레벨 드리프트에 불변이도록 pt가 아닌 %로 기록
+        # 컬럼 위치: 매크로종합=F(idx 5), 매크로종합변동=G(idx 6), SP500종가=H(idx 7)
+        import re as _re
         sp500_diff = None
-        if sp500_close is not None and len(existing) >= 2:
-            import re as _re
-            last_row = existing[-1]
-            if len(last_row) >= 7:
-                m = _re.search(r"-?\d+(?:\.\d+)?", str(last_row[6]).replace(",", ""))
-                if m:
-                    try:
-                        prev_close_row = float(m.group())
-                        if prev_close_row != 0:
-                            sp500_diff = (sp500_close - prev_close_row) / prev_close_row * 100
-                    except Exception:
-                        pass
+        macro_delta = None
+        prev_row = existing[-1] if len(existing) >= 2 else None
+        if sp500_close is not None and prev_row is not None and len(prev_row) >= 8:
+            m = _re.search(r"-?\d+(?:\.\d+)?", str(prev_row[7]).replace(",", ""))
+            if m:
+                try:
+                    prev_close_row = float(m.group())
+                    if prev_close_row != 0:
+                        sp500_diff = (sp500_close - prev_close_row) / prev_close_row * 100
+                except Exception:
+                    pass
+        if prev_row is not None and len(prev_row) >= 6:
+            m = _re.search(r"-?\d+(?:\.\d+)?", str(prev_row[5]).replace(",", ""))
+            cur_total = scores.get("macro_total")
+            if m and cur_total is not None:
+                try:
+                    macro_delta = float(cur_total) - float(m.group())
+                except Exception:
+                    pass
 
         from zoneinfo import ZoneInfo
         now = datetime.now(ZoneInfo("Asia/Seoul"))
@@ -224,6 +233,7 @@ def _append_row_to_sheet(sheet_name: str, scores: dict) -> bool:
             _r(scores.get("c_risk")),
             _r(scores.get("vix_score")),
             _r(scores.get("macro_total")),
+            _r(macro_delta, 1),
             sp500_close_label,
             _r(sp500_diff, 2),
             sp500_kind_label,
@@ -262,7 +272,7 @@ def _log_if_due(scores: dict, sheet_name: str, state_key: str) -> None:
 
 
 def log_timeseries_if_due(scores: dict) -> None:
-    """3시간 간격으로 타임시리즈 시트에 전수 기록."""
+    """매일 1회(KST 05:00, 미국 종가 직후) 타임시리즈 시트에 기록."""
     _log_if_due(scores, TIMESERIES_SHEET_NAME, "last_timeseries_ts")
 
 
