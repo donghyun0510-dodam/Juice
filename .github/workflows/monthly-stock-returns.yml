@@ -1,0 +1,48 @@
+name: Monthly Stock Returns
+on:
+  schedule:
+    # 매월 27일 UTC 13:00 = KST 22:00 (사용자가 평가액 업데이트 마치고 정산)
+    - cron: "0 13 27 * *"
+  workflow_dispatch:
+    inputs:
+      month:
+        description: "대상 월 YYYY-MM (생략 시 오늘 KST 기준)"
+        type: string
+        required: false
+
+concurrency:
+  group: sheet-writer
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    env:
+      TZ: Asia/Seoul
+      GOOGLE_OAUTH_TOKEN_B64: ${{ secrets.GOOGLE_OAUTH_TOKEN_B64 }}
+      GOOGLE_SA_JSON: ${{ secrets.GOOGLE_SA_JSON }}
+      GSHEET_FOLDER_ID: ${{ secrets.GSHEET_FOLDER_ID }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install Python deps
+        run: pip install -r requirements.txt
+
+      - name: Write SA credentials
+        run: printf '%s' "$GOOGLE_SA_JSON" > sa_credentials.json
+
+      - name: Update monthly stock returns
+        run: |
+          if [ -n "${{ inputs.month }}" ]; then
+            python monthly_stock_returns.py --month "${{ inputs.month }}"
+          else
+            python monthly_stock_returns.py
+          fi

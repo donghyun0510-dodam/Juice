@@ -1,0 +1,26 @@
+name: Monthly Input Reminder
+on:
+  schedule:
+    # 매월 27일 UTC 11:00 = KST 20:00 — 자동 정산(22:00) 2시간 전 리마인더
+    - cron: "0 11 27 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    env:
+      TZ: Asia/Seoul
+      GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Send reminder email
+        run: python monthly_input_reminder.py
