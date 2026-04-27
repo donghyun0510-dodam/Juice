@@ -469,10 +469,10 @@ def compute_t_risk_index(bond_2y_val, bond_10y_val, bond_30y_val):
     ORANGE = {"red": 1, "green": 0.5, "blue": 0}
     RED = {"red": 1, "green": 0, "blue": 0}
 
-    # 각 금리 수치별 점수 (선형)
-    score_2y = linear_risk_score(bond_2y_val, 4.5, 5.2)
-    score_10y = linear_risk_score(bond_10y_val, 4.2, 4.8)
-    score_30y = linear_risk_score(bond_30y_val, 4.3, 5.2)
+    # 각 금리 수치별 점수 (선형) — assess_risk 임계값과 동기 (b162d33)
+    score_2y = linear_risk_score(bond_2y_val, 4.2, 4.9)
+    score_10y = linear_risk_score(bond_10y_val, 3.9, 4.5)
+    score_30y = linear_risk_score(bond_30y_val, 4.0, 4.9)
 
     # 장단기 금리차 점수
     spread_score = 0
@@ -511,17 +511,18 @@ def compute_t_risk_index(bond_2y_val, bond_10y_val, bond_30y_val):
     # 가중 합산
     total = score_2y * 0.3 + score_10y * 0.35 + score_30y * 0.15 + spread_score * 0.2
 
-    # T-Risk는 0~30 스케일 → 100점 환산
+    # T-Risk는 0~30 스케일 → 100점 환산 (스카우터/대시보드와 동일 스케일)
     normalized = total * (100 / 30)
 
-    if total <= 5:
-        return f"안정({total:.0f}점)", GREEN, normalized
-    elif total <= 10:
-        return f"주의({total:.0f}점)", YELLOW, normalized
-    elif total <= 20:
-        return f"위험({total:.0f}점)", ORANGE, normalized
+    # 라벨/점수는 normalized(0~100) 기준 — 스카우터와 통일 (raw 5/10/20 → norm 17/33/67)
+    if normalized <= 17:
+        return f"안정({normalized:.0f}점)", GREEN, normalized
+    elif normalized <= 33:
+        return f"주의({normalized:.0f}점)", YELLOW, normalized
+    elif normalized <= 67:
+        return f"위험({normalized:.0f}점)", ORANGE, normalized
     else:
-        return f"고위험({total:.0f}점)", RED, normalized
+        return f"고위험({normalized:.0f}점)", RED, normalized
 
 
 def compute_macro_composite(t_risk_score, fx_risk_score, c_risk_score, vix_val):

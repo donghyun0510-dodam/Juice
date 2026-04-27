@@ -1,7 +1,7 @@
 name: Daily Review - Global
 on:
   schedule:
-    - cron: "7 20 * * 1-5"   # 05:07 KST (전일 20:07 UTC) · 월~금 — 정각 혼잡 회피
+    - cron: "37 21 * * 1-5"  # 06:37 KST (전일 21:37 UTC) · 월~금 — 미국 장마감 후 1.5h 버퍼 (yfinance 일봉 갱신 대기)
   workflow_dispatch:
 
 concurrency:
