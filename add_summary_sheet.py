@@ -29,7 +29,7 @@ except gspread.WorksheetNotFound:
 
 # 헤더: A 월 | B 주식 | C 저축 | D 자산 합계 | E 대출 | F 순자산 | G 월 변동 | H 월 변동률 | I 누적 변동률
 ws4.update(values=[[
-    "월", "주식 평가액", "저축 합계", "자산 합계", "대출 잔액", "순자산",
+    "월", "운용자산(KB+IRP)", "예적금", "자산 합계", "대출 잔액", "순자산",
     "월 변동", "월 변동률", "누적 변동률"
 ]], range_name="A1:I1")
 
@@ -50,10 +50,12 @@ for r in range(2, 100):
         cum_pct = f"=IF(F{r}=\"\",\"\",IFERROR(F{r}/F$2-1,\"\"))"
 
     formulas.append([
-        # B 주식 평가액 — 주식 시트에서 매칭
-        f"=IFERROR(VLOOKUP($A{r},주식!$A:$B,2,FALSE),\"\")",
-        # C 저축 합계 — 저축 시트 F열
-        f"=IFERROR(VLOOKUP($A{r},저축!$A:$F,6,FALSE),\"\")",
+        # B 운용자산(KB+IRP) = 주식!B + 저축!E(IRP)
+        f"=IFERROR(VLOOKUP($A{r},주식!$A:$B,2,FALSE),0)"
+        f"+IFERROR(VLOOKUP($A{r},저축!$A:$E,5,FALSE),0)",
+        # C 예적금 = 저축!F(합계) - 저축!E(IRP)
+        f"=IFERROR(VLOOKUP($A{r},저축!$A:$F,6,FALSE),0)"
+        f"-IFERROR(VLOOKUP($A{r},저축!$A:$E,5,FALSE),0)",
         # D 자산 합계 = B + C
         f"=IF(AND(B{r}=\"\",C{r}=\"\"),\"\",N(B{r})+N(C{r}))",
         # E 대출 잔액 — 대출 시트 H열 (총 잔액)
