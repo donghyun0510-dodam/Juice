@@ -1881,6 +1881,20 @@ def main():
         date_str = sys.argv[idx + 1]
         today = datetime.strptime(date_str, "%y%m%d")
     else:
+        # 국장 모드: 시트 날짜를 yfinance의 실제 최신 KRX 거래일에 정렬
+        # (cron 지연으로 자정을 넘기거나 yfinance 일봉 게시 지연이 있을 때
+        # 데이터와 시트 날짜가 어긋나는 문제 방지 — 4/29 시트에 4/27 종가가
+        # 들어가는 사고 재발 방지)
+        if korea_only:
+            try:
+                kospi_hist = yf.download("^KS11", period="10d", progress=False)["Close"].dropna()
+                if len(kospi_hist) > 0:
+                    latest_kr_date = kospi_hist.index[-1].to_pydatetime()
+                    if latest_kr_date.date() != today.date():
+                        print(f"  → 시트 날짜 정렬: {today.strftime('%Y-%m-%d')} → {latest_kr_date.strftime('%Y-%m-%d')} (yfinance 최신 KRX 바 기준)")
+                        today = latest_kr_date
+            except Exception as e:
+                print(f"  (KRX 최신 거래일 조회 실패, datetime.now() 유지: {e})")
         date_str = today.strftime("%y%m%d")
     sheet_name = f"증시 리뷰_{date_str}"
 

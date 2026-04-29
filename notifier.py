@@ -154,24 +154,31 @@ def _append_row_to_sheet(sheet_name: str, scores: dict) -> bool:
         from googleapiclient.discovery import build
         drive = build("drive", "v3", credentials=creds)
 
-        # 미국 현물장 개장 여부 — 폐장 중엔 E-mini S&P500 선물(ES=F) 사용
-        # (KST 월~금 22:30~05:00이 미국 현물 거래시간)
+        # 항상 미국 현물 S&P500(^GSPC)의 가장 최근 완성된 일봉 종가 사용
+        # (cron은 KST 05:17 = ET 16:17, 현물 마감 17분 후 — 일봉 갱신 완료 시점)
+        # 호출 시점이 미국 현물 장중이면 진행 중인 일봉을 제외하고 직전 완성 일봉 사용
         from datetime import timezone, timedelta as _td, time as _dtime
-        _kst = datetime.now(timezone(_td(hours=9)))
-        _t, _wd = _kst.time(), _kst.weekday()
-        us_open = (_t >= _dtime(22, 30) and _wd <= 4) or (_t <= _dtime(5, 0) and 1 <= _wd <= 5)
-        use_futures = not us_open
-        sp500_ticker = "ES=F" if use_futures else "^GSPC"
+        from zoneinfo import ZoneInfo as _ZI
+        _et = datetime.now(_ZI("America/New_York"))
         sp500_close = None
         try:
-            hist = yf.Ticker(sp500_ticker).history(period="2d")
+            hist = yf.Ticker("^GSPC").history(period="10d")["Close"].dropna()
             if len(hist) >= 1:
-                sp500_close = float(hist["Close"].iloc[-1])
+                last_bar_date = hist.index[-1].date()
+                # 미국 현물 장중(09:30~16:00 ET)에 호출되었고 마지막 바가 오늘이면
+                # 그 바는 미완성이므로 직전 일봉 사용
+                in_cash_session = (
+                    _et.weekday() <= 4
+                    and _dtime(9, 30) <= _et.time() < _dtime(16, 0)
+                )
+                if in_cash_session and last_bar_date == _et.date() and len(hist) >= 2:
+                    sp500_close = float(hist.iloc[-2])
+                else:
+                    sp500_close = float(hist.iloc[-1])
         except Exception:
             pass
-        # sp500_diff 는 아래에서 '직전 시트 행'의 종가 대비로 계산 (상관분석용)
         sp500_close_label = round(sp500_close, 2) if sp500_close is not None else ""
-        sp500_kind_label = "선물" if (sp500_close is not None and use_futures) else ""
+        sp500_kind_label = ""  # 항상 현물
 
         q = (f"name='{sheet_name}' and '{PERF_FOLDER_ID}' in parents "
              "and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false")
@@ -191,10 +198,24 @@ def _append_row_to_sheet(sheet_name: str, scores: dict) -> bool:
         if not existing or existing[0] != PERF_HEADERS:
             ws.update(range_name="A1", values=[PERF_HEADERS])
 
+        import re as _re
+
+        # 직전 행과 동일한 S&P500 종가 → 미국 현물 휴장(주말 외 공휴일)로
+        # 신규 마감 없음 → 스킵
+        if sp500_close is not None and len(existing) >= 2:
+            _prev_h = existing[-1][7] if len(existing[-1]) >= 8 else ""
+            _m = _re.search(r"-?\d+(?:\.\d+)?", str(_prev_h).replace(",", ""))
+            if _m:
+                try:
+                    if abs(float(_m.group()) - sp500_close) < 0.01:
+                        print(f"[notifier] {sheet_name}: 직전 행 S&P500 종가({_m.group()})와 동일 — 미국 현물 휴장 추정, 스킵", flush=True)
+                        return False
+                except Exception:
+                    pass
+
         # 직전 로그 행의 S&P500 종가 대비 변동(%) — 매크로종합과의 상관분석용
         # 지수 레벨 드리프트에 불변이도록 pt가 아닌 %로 기록
         # 컬럼 위치: 매크로종합=F(idx 5), 매크로종합변동=G(idx 6), SP500종가=H(idx 7)
-        import re as _re
         sp500_diff = None
         macro_delta = None
         prev_row = existing[-1] if len(existing) >= 2 else None
@@ -272,7 +293,14 @@ def _log_if_due(scores: dict, sheet_name: str, state_key: str) -> None:
 
 
 def log_timeseries_if_due(scores: dict) -> None:
-    """매일 1회(KST 05:00, 미국 종가 직후) 타임시리즈 시트에 기록."""
+    """매일 1회(KST 05:00, 미국 종가 직후) 타임시리즈 시트에 기록.
+    KST 일·월요일은 미국 현물 마감 종가가 직전 토요일 기록과 동일하므로 스킵."""
+    from zoneinfo import ZoneInfo
+    kst_wd = datetime.now(ZoneInfo("Asia/Seoul")).weekday()  # Mon=0..Sun=6
+    if kst_wd in (0, 6):  # 월요일/일요일 KST = 직전 미국 현물 마감(금) 동일
+        if os.environ.get("FORCE_APPEND") != "1":
+            print(f"[notifier] {TIMESERIES_SHEET_NAME}: KST {'월' if kst_wd==0 else '일'}요일 — 신규 미국 현물 종가 없음, 스킵", flush=True)
+            return
     _log_if_due(scores, TIMESERIES_SHEET_NAME, "last_timeseries_ts")
 
 
