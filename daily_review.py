@@ -190,10 +190,11 @@ def _yf_daily_pct(ticker):
 
 # ── 위험 진단 함수 ──
 def parse_price(price_str):
-    """포맷된 가격 문자열을 숫자로 변환"""
+    """포맷된 가격 문자열을 숫자로 변환 ('1,472.00 ⚠05/08' 같은 stale 마킹은 무시)"""
     try:
-        return float(price_str.replace(",", ""))
-    except (ValueError, AttributeError):
+        token = price_str.split()[0] if price_str else ""
+        return float(token.replace(",", ""))
+    except (ValueError, AttributeError, IndexError):
         return None
 
 
@@ -1620,35 +1621,58 @@ def build_korea_sheet(target_date):
         print(f"  한국 스냅샷 저장 실패: {e}")
 
     # 소수점 2자리 고정 포맷 (국장 지수/환율용)
-    def get_price_and_change_2f(ticker_symbol):
-        try:
-            tk = yf.Ticker(ticker_symbol)
-            hist = tk.history(period="10d")["Close"].dropna()
-            if len(hist) < 2:
-                return "", ""
-            prev_close = float(hist.iloc[-2])
-            last_close = float(hist.iloc[-1])
-            pct = (last_close - prev_close) / prev_close * 100
-            price_str = f"{last_close:,.2f}"
-            return price_str, f"{pct:+.2f}%"
-        except Exception:
+    # fallback_ticker: 지수 일봉 close=null로 publish되는 케이스 대비 ETF 폴백
+    #   ETF가 더 최신 바를 가지면 등락률은 ETF, 가격은 (지수 last close × (1+ETF%))로 추정
+    # last bar 날짜 < target_date면 가격 끝에 ⚠MM/DD 마킹
+    def get_price_and_change_2f(ticker_symbol, fallback_ticker=None):
+        def fetch(t):
+            try:
+                return yf.Ticker(t).history(period="10d")["Close"].dropna()
+            except Exception:
+                return None
+
+        idx_hist = fetch(ticker_symbol)
+        if idx_hist is None or len(idx_hist) < 2:
             return "", ""
 
-    # 아시아 지수 (종가 + 등락률)
+        last_date = idx_hist.index[-1].date()
+        prev_close = float(idx_hist.iloc[-2])
+        last_close = float(idx_hist.iloc[-1])
+
+        if fallback_ticker:
+            etf_hist = fetch(fallback_ticker)
+            if etf_hist is not None and len(etf_hist) >= 2 and etf_hist.index[-1].date() > last_date:
+                etf_prev = float(etf_hist.iloc[-2])
+                etf_last = float(etf_hist.iloc[-1])
+                etf_pct = (etf_last - etf_prev) / etf_prev
+                prev_close = last_close
+                last_close = last_close * (1 + etf_pct)
+                last_date = etf_hist.index[-1].date()
+
+        pct = (last_close - prev_close) / prev_close * 100
+        price_str = f"{last_close:,.2f}"
+        chg_str = f"{pct:+.2f}%"
+
+        if last_date < target_date.date():
+            price_str += f" ⚠{last_date.strftime('%m/%d')}"
+
+        return price_str, chg_str
+
+    # 아시아 지수 (종가 + 등락률) — 일본/대만은 ETF 폴백, 홍콩/상해는 stale 마킹만
     asia_indices = [
-        ("니케이225", "^N225"),
-        ("대만 가권", "^TWII"),
-        ("항셍", "^HSI"),
-        ("상해종합", "000001.SS"),
+        ("니케이225",  "^N225",     "1321.T"),   # Nomura Nikkei225 ETF
+        ("대만 가권",  "^TWII",     "0050.TW"),  # 元大台灣50
+        ("항셍",       "^HSI",      None),       # HK ETF도 같이 lag → stale 마킹만
+        ("상해종합",   "000001.SS", None),       # CN ETF도 같이 lag → stale 마킹만
     ]
     asia_data = {}
-    for name, ticker in asia_indices:
-        asia_data[name] = get_price_and_change_2f(ticker)
+    for name, ticker, fb in asia_indices:
+        asia_data[name] = get_price_and_change_2f(ticker, fb)
 
-    # 한국 지수/매크로 (종가 + 등락률)
-    kospi_price, kospi_chg = get_price_and_change_2f("^KS11")
-    kospi200_price, kospi200_chg = get_price_and_change_2f("^KS200")
-    kosdaq_price, kosdaq_chg = get_price_and_change_2f("^KQ11")
+    # 한국 지수/매크로 (종가 + 등락률) — Yahoo가 KR 지수 close를 null로 게시하는 사례 대비 ETF 폴백
+    kospi_price,    kospi_chg    = get_price_and_change_2f("^KS11",  "069500.KS")  # KODEX 200
+    kospi200_price, kospi200_chg = get_price_and_change_2f("^KS200", "069500.KS")
+    kosdaq_price,   kosdaq_chg   = get_price_and_change_2f("^KQ11",  "229200.KS")  # KODEX 코스닥150
 
     usd_krw_price, usd_krw_chg = get_price_and_change_2f("KRW=X")
 
@@ -1886,15 +1910,20 @@ def main():
         # 데이터와 시트 날짜가 어긋나는 문제 방지 — 4/29 시트에 4/27 종가가
         # 들어가는 사고 재발 방지)
         if korea_only:
-            try:
-                kospi_hist = yf.download("^KS11", period="10d", progress=False)["Close"].dropna()
-                if len(kospi_hist) > 0:
-                    latest_kr_date = kospi_hist.index[-1].to_pydatetime()
-                    if latest_kr_date.date() != today.date():
-                        print(f"  → 시트 날짜 정렬: {today.strftime('%Y-%m-%d')} → {latest_kr_date.strftime('%Y-%m-%d')} (yfinance 최신 KRX 바 기준)")
-                        today = latest_kr_date
-            except Exception as e:
-                print(f"  (KRX 최신 거래일 조회 실패, datetime.now() 유지: {e})")
+            # 069500.KS(KODEX200) 우선, ^KS11 폴백 — Yahoo가 KR 지수 일봉 close를
+            # null로 게시하는 케이스(5/11 사례)에 ETF가 더 신뢰 가능
+            latest_kr_date = None
+            for ticker in ("069500.KS", "^KS11"):
+                try:
+                    hist = yf.download(ticker, period="10d", progress=False)["Close"].dropna()
+                    if len(hist) > 0:
+                        latest_kr_date = hist.index[-1].to_pydatetime()
+                        break
+                except Exception as e:
+                    print(f"  ({ticker} 최신 거래일 조회 실패: {e})")
+            if latest_kr_date and latest_kr_date.date() != today.date():
+                print(f"  → 시트 날짜 정렬: {today.strftime('%Y-%m-%d')} → {latest_kr_date.strftime('%Y-%m-%d')} (yfinance 최신 KRX 바 기준)")
+                today = latest_kr_date
         date_str = today.strftime("%y%m%d")
     sheet_name = f"증시 리뷰_{date_str}"
 
