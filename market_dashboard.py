@@ -1597,7 +1597,7 @@ def fetch_today_events():
         if not rows or len(rows) < 2:
             return latest["name"], []
 
-        # 헤더: 날짜 | 요일 | 시간(KST) | 국가 | 지표명 | 예상 | 이전
+        # 헤더: 날짜 | 요일 | 시간(KST) | 국가 | 지표명 | 예상 | 이전 | 발표(선택)
         today_rows = [r for r in rows[1:] if r and r[0] == today_str]
         return latest["name"], today_rows
     except Exception as e:
@@ -1624,18 +1624,24 @@ else:
         _name = _r[4] if len(_r) > 4 else ""
         _fcst = _r[5] if len(_r) > 5 else ""
         _prev = _r[6] if len(_r) > 6 else ""
+        _actual = _r[7] if len(_r) > 7 else ""
+        # 예상/이전은 옅은 회색, 발표치는 진한 강조색 + bold로 차별화
         _details = []
         if _fcst:
-            _details.append(f"예상 {_fcst}")
+            _details.append(f'<span style="color:#888;">예상 {_fcst}</span>')
         if _prev:
-            _details.append(f"이전 {_prev}")
+            _details.append(f'<span style="color:#888;">이전 {_prev}</span>')
+        if _actual:
+            _details.append(
+                f'<span style="color:{ACCENT_GOLD};font-weight:700;font-size:1.05em;">발표 {_actual}</span>'
+            )
         _detail_str = " · ".join(_details)
         _items_html += (
             f'<li style="margin-bottom:6px;">'
             f'<span style="color:{ACCENT_GOLD};font-family:Consolas,monospace;font-weight:600;">{_time}</span> '
             f'<span style="color:{TEXT_SECONDARY};font-size:0.9em;">[{_country}]</span> '
             f'<strong>{_name}</strong>'
-            + (f' <span style="color:#888;font-size:0.85em;">— {_detail_str}</span>' if _detail_str else '')
+            + (f' <span style="font-size:0.85em;">— {_detail_str}</span>' if _detail_str else '')
             + '</li>'
         )
     st.markdown(

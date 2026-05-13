@@ -1,0 +1,30 @@
+name: Fill Event Actuals
+on:
+  schedule:
+    # 매 30분 (월~금) — 미장(US 21:30 KST 전후) + 한장/아시아 발표 시간대 커버
+    - cron: "*/30 * * * 1-5"
+  workflow_dispatch:
+
+concurrency:
+  group: sheet-writer
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    env:
+      TZ: Asia/Seoul
+      GOOGLE_OAUTH_TOKEN_B64: ${{ secrets.GOOGLE_OAUTH_TOKEN_B64 }}
+      GOOGLE_SA_JSON: ${{ secrets.GOOGLE_SA_JSON }}
+      GSHEET_FOLDER_ID: ${{ secrets.GSHEET_FOLDER_ID }}
+      RULES_DEPLOY_KEY: ${{ secrets.RULES_DEPLOY_KEY }}
+      FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup
+
+      - name: Fill event actuals
+        run: python fill_event_actuals.py

@@ -6,7 +6,8 @@
 미국/유럽/중국/일본/한국 high impact 이벤트만 수집하여
 구글 드라이브 `주식리뷰` 폴더에 '주간 경제일정_YYMMDD' 스프레드시트로 저장.
 
-컬럼: 날짜 | 요일 | 시간(KST) | 국가 | 지표명 | 예상 | 이전
+컬럼: 날짜 | 요일 | 시간(KST) | 국가 | 지표명 | 예상 | 이전 | 발표
+발표 컬럼은 생성 시 비워두고 fill_event_actuals.py가 발표 후 채움.
 
 환경변수 FINNHUB_API_KEY 필수.
 """
@@ -317,11 +318,11 @@ def fetch_weekly_events(date_from, date_to):
 
 
 def build_rows(events):
-    rows = [["날짜", "요일", "시간(KST)", "국가", "지표명", "예상", "이전"]]
+    rows = [["날짜", "요일", "시간(KST)", "국가", "지표명", "예상", "이전", "발표"]]
     for e in events:
         rows.append([
             e["date"], e["weekday"], e["time"], e["country"],
-            e["name"], e["forecast"], e["previous"],
+            e["name"], e["forecast"], e["previous"], "",
         ])
     return rows
 
@@ -333,7 +334,7 @@ def create_sheet(gc, title, rows):
     ws.update_title("경제일정")
     ws.update(range_name="A1", values=rows)
     try:
-        ws.format("A1:G1", {"textFormat": {"bold": True}, "horizontalAlignment": "CENTER"})
+        ws.format("A1:H1", {"textFormat": {"bold": True}, "horizontalAlignment": "CENTER"})
         ws.freeze(rows=1)
     except Exception as e:
         print(f"  서식 적용 실패(무시): {e}")
@@ -354,7 +355,7 @@ def main():
     rows = build_rows(events)
     if not events:
         print("3성급 이벤트 0건 — placeholder 시트 생성")
-        rows.append(["", "", "", "", "이번 주 3성급 이벤트 없음", "", ""])
+        rows.append(["", "", "", "", "이번 주 3성급 이벤트 없음", "", "", ""])
 
     title = f"주간 경제일정_{upcoming_monday.strftime('%y%m%d')}"
 
