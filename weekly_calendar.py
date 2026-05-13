@@ -44,6 +44,30 @@ WEEKDAY_KR = ["월", "화", "수", "목", "금", "토", "일"]
 
 FINNHUB_URL = "https://finnhub.io/api/v1/calendar/economic"
 
+# 매크로 분석 시 자주 인용하는 핵심 지표 — Finnhub impact가 high 미만이어도 포함.
+# YoY/Core 변형이 medium으로 분류되는 경우 (예: PPI YoY가 누락되는 사례) 대비.
+CORE_MACRO_KEYWORDS = (
+    "CPI", "PPI", "PCE", "INFLATION",
+    "NONFARM PAYROLLS", "NON FARM PAYROLLS",
+    "UNEMPLOYMENT RATE", "JOLTS", "ADP", "AVERAGE HOURLY EARNINGS",
+    "RETAIL SALES", "PERSONAL SPENDING", "PERSONAL INCOME",
+    "GDP", "INDUSTRIAL PRODUCTION", "DURABLE GOODS",
+    "ISM", "PMI",
+    "CONSUMER CONFIDENCE", "MICHIGAN",
+    "BUILDING PERMITS", "HOUSING STARTS",
+    "EXISTING HOME SALES", "NEW HOME SALES",
+    "FOMC", "FED INTEREST RATE", "ECB INTEREST RATE", "BOJ INTEREST RATE", "BOK INTEREST RATE",
+)
+
+
+def _is_relevant_event(item):
+    """high-impact 또는 핵심 매크로 지표면 통과."""
+    impact = (item.get("impact") or "").lower()
+    if impact == "high":
+        return True
+    name_upper = (item.get("event") or "").upper()
+    return any(kw in name_upper for kw in CORE_MACRO_KEYWORDS)
+
 
 # ── 지표명 한글 변환 ────────────────────────────────────────────────────────
 # Finnhub `event` 필드(영문)를 한국 매크로 리포트에서 통상 쓰는 한글명으로 변환.
@@ -261,7 +285,7 @@ def fetch_weekly_events(date_from, date_to):
     events = []
     seen = set()
     for item in raw:
-        if (item.get("impact") or "").lower() != "high":
+        if not _is_relevant_event(item):
             continue
         country = COUNTRY_MAP.get((item.get("country") or "").strip().upper())
         if not country:
