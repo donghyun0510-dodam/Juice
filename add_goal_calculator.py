@@ -59,13 +59,16 @@ ws.update(values=labels_b, range_name="A1:A27")
 for c in ["B2", "B14", "E2", "F2", "G2", "H2", "I2"]:
     ws.format(c, {"numberFormat": {"type": "TEXT"}})
 
+# 종합 시트의 "완성된 마지막 월" 행을 추출 — A열에 월만 미리 추가하고 데이터 입력 중인
+# 행(VLOOKUP 미스로 E열이 ""인 행)은 건너뜀. E열(대출 잔액) 숫자 개수 = 완성 행 위치
+LAST_ROW = 'COUNT(종합!$E$2:$E$99)'
 values_b = [
     [""],                                                                                        # 1
-    ['=INDEX(종합!$A$2:$A$99, COUNTA(종합!$A$2:$A$99))'],                                         # 2
-    ['=INDEX(종합!$B$2:$B$99, COUNTA(종합!$A$2:$A$99))'],                                         # 3
-    ['=INDEX(종합!$C$2:$C$99, COUNTA(종합!$A$2:$A$99))'],                                         # 4
-    ['=INDEX(종합!$E$2:$E$99, COUNTA(종합!$A$2:$A$99))'],                                         # 5
-    ['=INDEX(종합!$F$2:$F$99, COUNTA(종합!$A$2:$A$99))'],                                         # 6
+    [f'=IFERROR(INDEX(종합!$A$2:$A$99, {LAST_ROW}), "")'],                                       # 2
+    [f'=IFERROR(INDEX(종합!$B$2:$B$99, {LAST_ROW}), 0)'],                                        # 3
+    [f'=IFERROR(INDEX(종합!$C$2:$C$99, {LAST_ROW}), 0)'],                                        # 4
+    [f'=IFERROR(INDEX(종합!$E$2:$E$99, {LAST_ROW}), 0)'],                                        # 5
+    [f'=IFERROR(INDEX(종합!$F$2:$F$99, {LAST_ROW}), 0)'],                                        # 6
     [""],                                                                                        # 7
     [""],                                                                                        # 8
     [820000],                                                                                    # 9 (자동이체만 — 청년도약 70만 + 일반적금 10만 + 주청 2만)
