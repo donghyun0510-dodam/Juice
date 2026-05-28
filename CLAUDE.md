@@ -82,4 +82,4 @@ python daily_review.py
 - GitHub Actions는 **레포 활동이 60일간 없으면 스케줄 cron을 자동 비활성화**함 → 정기적으로 확인 필요
 - 구버전 Windows Task Scheduler(`StockReview_Global`/`StockReview_Korea`)와 로컬 `run_*.bat`은 **더 이상 사용하지 않음** (2026-05-28 `_archive/` 폴더로 이동, 히스토리 용도로 보관)
 - OAuth2 전환으로 사용하지 않게 된 `credentials.json`도 같은 시점 `_archive/`로 이동
-- `.claude/skills/` — 도담아빠 블로그 작성·매크로 해석 등 6개 스킬. 호출: `/blog-kr`, `/blog-us`, `/blog-thematic`, `/macro-interpret`, `/frame-mean-reversion`, `/frame-ai-capex`
+- `.claude/skills/` — 도담아빠 블로그 작성·매크로 해석 4개 스킬. 호출: `/blog-kr`, `/blog-us`, `/blog-thematic`, `/macro-interpret`. 평균 회귀·AI Capex 프레임은 `/blog-kr`·`/blog-us`에 통합됨.
