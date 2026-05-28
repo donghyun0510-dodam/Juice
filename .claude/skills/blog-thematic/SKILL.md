@@ -68,4 +68,3 @@ description: "도담아빠 블로그 테마형 deep-dive 글 작성 — 특정 I
 ## 관련 스킬
 - 일일 국장 리뷰: `/blog-kr`
 - 일일 미장 리뷰: `/blog-us`
-- 경제지표 해석 프레임: `/macro-interpret`
