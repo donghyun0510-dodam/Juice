@@ -13,6 +13,7 @@ from googleapiclient.discovery import build
 import yfinance as yf
 import requests as req
 from market_common import classify_signal, SIGNAL_LABEL_KR, save_snapshot
+from scouter_core import get_yield_live
 from bs4 import BeautifulSoup
 import re
 from datetime import datetime, timedelta
@@ -649,10 +650,11 @@ def build_global_sheet(target_date):
     # 경제지표 (FRED) - 전날 발표된 것만
     econ_items = build_economic_indicators(target_date)
 
-    # 매크로 - 금리
-    bond_2y, bond_2y_chg = get_price_and_change("2YY=F")
-    bond_10y, bond_10y_chg = get_price_and_change("^TNX")
-    bond_30y, bond_30y_chg = get_price_and_change("^TYX")
+    # 매크로 - 금리 (CNBC primary + yfinance fallback — scouter/dashboard와 동일 소스로 통일)
+    # 2YY=F는 현물 2Y 대비 ~20bp 괴리 + stale 빈번 → CNBC US2Y 우선
+    bond_2y, bond_2y_chg, _ = get_yield_live("2Y", None)
+    bond_10y, bond_10y_chg, _ = get_yield_live("10Y", "^TNX")
+    bond_30y, bond_30y_chg, _ = get_yield_live("30Y", "^TYX")
 
     # 매크로 - 환율
     dxy, dxy_chg = get_price_and_change("DX-Y.NYB")
@@ -1526,6 +1528,7 @@ def build_korea_sheet(target_date):
     kr_tickers = [info[2] for info in kr_stocks_info]
     kr_changes = {}
     kr_signs = {}
+    kr_stale = {}  # {ticker: "⚠MM/DD"} — last bar < target_date인 경우만 마킹
     kr_signal_tags = {}  # {ticker: tag} 스냅샷용
     try:
         data_2y = yf.download(kr_tickers, period="2y", progress=False)
@@ -1537,6 +1540,9 @@ def build_korea_sheet(target_date):
                 if len(col) >= 2:
                     pct = (col.iloc[-1] - col.iloc[-2]) / col.iloc[-2] * 100
                     kr_changes[ticker] = f"{pct:+.2f}%"
+                    last_date = col.index[-1].date()
+                    if last_date < target_date.date():
+                        kr_stale[ticker] = f"⚠{last_date.strftime('%m/%d')}"
                 else:
                     kr_changes[ticker] = ""
                     kr_signs[ticker] = ""
@@ -1697,7 +1703,7 @@ def build_korea_sheet(target_date):
 
     # 시트 구성
     rows = []
-    rows.append(["단계", "주제", "체크포인트", "내용", "비고", "", "", "", "", ""])
+    rows.append(["단계", "주제", "체크포인트", "내용", "비고", "", "데이터 일자", "", "", ""])
 
     # 1. 시장 뉴스 (수동)
     rows.append(["1.시장 뉴스", "정책", "", "", "", "", "", "", "", ""])
@@ -1775,6 +1781,7 @@ def build_korea_sheet(target_date):
     for sector, name, ticker, krx in kr_stocks_info:
         chg = kr_changes.get(ticker, "")
         sign = kr_signs.get(ticker, "")
+        stale = kr_stale.get(ticker, "")
         row = [
             "5.섹터/종목" if first_sector and sector else "",
             sector,
@@ -1782,7 +1789,7 @@ def build_korea_sheet(target_date):
             chg,
             sign,
             ticker,  # col F: 티커 (대시보드가 source of truth로 읽어감)
-            "",
+            stale,   # col G: 전일 데이터 마킹 (yfinance가 target_date 일봉 미게시 시)
             "",
             "",
             "",
@@ -1802,6 +1809,9 @@ def build_korea_sheet(target_date):
         # 매매 신호 색상 (E열)
         if sign in SIGN_COLORS:
             color_cells.append((len(rows), "E", SIGN_COLORS[sign]))
+        # stale 마킹 색상 (G열, 빨강)
+        if stale:
+            color_cells.append((len(rows), "G", RED_TEXT))
 
     # 특징주 스캔 (시총 2조+ 미추적 종목 중 Long Sign)
     existing_kr_tickers = [info[2] for info in kr_stocks_info]

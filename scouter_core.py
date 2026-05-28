@@ -267,13 +267,19 @@ def _fetch_cnbc_yield(sym):
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
         resp = req.get(f"https://www.cnbc.com/quotes/{sym}", headers=headers, timeout=15)
         text = resp.text
-        m_last = re.search(r'QuoteStrip-lastPrice[^>]*>([0-9.]+)', text) or re.search(r'"last":"?([0-9.]+)"?', text)
-        m_chg = re.search(r'QuoteStrip-changePercent[^>]*>\(?(-?[0-9.]+%?)', text) or re.search(r'"change_pct":"([^"]+)"', text)
+        m_last = re.search(r'QuoteStrip-lastPrice[^>]*>([0-9.]+)', text) or re.search(rf'"symbol":"{sym}"[^{{]*?"last":"?([0-9.]+)', text)
         if not m_last:
             print(f"[cnbc_yield] FAIL sym={sym} status={resp.status_code}", flush=True)
             return "", "", None
         val = float(m_last.group(1))
-        return f"{val:.3f}", (m_chg.group(1) if m_chg else ""), val
+        # CNBC의 "change_pct"는 US2Y에 한해 채권 가격 기준 값이 섞여 들어옴 → previous_day_closing으로 직접 계산
+        m_prev = re.search(rf'"symbol":"{sym}"[^{{]*?"previous_day_closing":"?([0-9.]+)', text)
+        chg_str = ""
+        if m_prev:
+            prev = float(m_prev.group(1))
+            if prev:
+                chg_str = f"{(val - prev) / prev * 100:+.2f}%"
+        return f"{val:.3f}", chg_str, val
     except Exception as e:
         print(f"[cnbc_yield] EXC sym={sym} {type(e).__name__}: {e}", flush=True)
         return "", "", None
@@ -286,6 +292,11 @@ def get_yield_investing(maturity):
 def _yf_yield(yf_ticker):
     try:
         tk = yf.Ticker(yf_ticker)
+        d = tk.history(period="10d")["Close"].dropna()
+        # 2YY=F 등은 yfinance에서 며칠째 동일값으로 멈추는 경우가 있음 → stale은 폴백에서 제외
+        if len(d) >= 5 and float(d.iloc[-5:].std()) < 1e-6:
+            print(f"[yf_yield] STALE sym={yf_ticker} last5={list(d.iloc[-5:])}", flush=True)
+            return "", "", None
         try:
             m = tk.history(period="2d", interval="1m")["Close"].dropna()
             if len(m):
@@ -295,7 +306,6 @@ def _yf_yield(yf_ticker):
                 return f"{last:.3f}", chg_str, last
         except Exception:
             pass
-        d = tk.history(period="10d")["Close"].dropna()
         if len(d) >= 2:
             last = float(d.iloc[-1])
             prev = float(d.iloc[-2])
