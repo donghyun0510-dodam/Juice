@@ -315,10 +315,68 @@ def _yf_yield(yf_ticker):
     return "", "", None
 
 
+# ── 미 재무부 일일 par yield: 공식 폴백 (2Y는 yfinance 스팟 티커가 없고 2YY=F가 자주 stale) ──
+_TREASURY_COL = {"2Y": "2 Yr", "10Y": "10 Yr", "30Y": "30 Yr"}
+_TREASURY_CACHE = {"ts": None, "data": None}
+_TREASURY_LOCK = threading.Lock()
+
+
+def _load_treasury_yields():
+    """미 재무부 daily par yield CSV에서 최신·직전 영업일 금리를 dict로 반환.
+    {"2Y": (val_str, chg_str, val), ...}. 프로세스 내 15분 캐시(3만기 1회 HTTP)."""
+    import csv, io
+    with _TREASURY_LOCK:
+        c = _TREASURY_CACHE
+        if c["data"] is not None and c["ts"] and (datetime.now() - c["ts"]).total_seconds() < 900:
+            return c["data"]
+        out = {}
+        try:
+            yr = datetime.now().year
+            rows = None
+            for y in (yr, yr - 1):  # 연초 경계 대비
+                url = ("https://home.treasury.gov/resource-center/data-chart-center/"
+                       f"interest-rates/daily-treasury-rates.csv/{y}/all"
+                       "?type=daily_treasury_yield_curve&_format=csv")
+                resp = req.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=20)
+                rr = list(csv.reader(io.StringIO(resp.text)))
+                if len(rr) >= 3:
+                    rows = rr
+                    break
+            if rows:
+                hdr = rows[0]
+
+                def _pd(s):
+                    try:
+                        return datetime.strptime(s, "%m/%d/%Y")
+                    except Exception:
+                        return datetime.min
+
+                data = sorted([r for r in rows[1:] if r and r[0]], key=lambda r: _pd(r[0]))
+                latest, prev = data[-1], data[-2]
+                for mat, col in _TREASURY_COL.items():
+                    if col in hdr:
+                        i = hdr.index(col)
+                        v, p = float(latest[i]), float(prev[i])
+                        chg = f"{(v - p) / p * 100:+.2f}%" if p else ""
+                        out[mat] = (f"{v:.3f}", chg, v)
+        except Exception as e:
+            print(f"[treasury_yield] EXC {type(e).__name__}: {e}", flush=True)
+        c["data"], c["ts"] = out, datetime.now()
+        return out
+
+
+def _fetch_treasury_yield(maturity):
+    return _load_treasury_yields().get(maturity, ("", "", None))
+
+
 def get_yield_live(maturity, yf_ticker):
     r = _fetch_cnbc_yield(CNBC_YIELD_SYM.get(maturity, ""))
     if r[2] is not None:
         return r
+    # CNBC 실패 → 미 재무부 공식 par yield 폴백 (특히 2Y: 스팟 티커 부재 + 2YY=F staleness)
+    t = _fetch_treasury_yield(maturity)
+    if t[2] is not None:
+        return t
     return _yf_yield(yf_ticker or YIELD_YF.get(maturity, ""))
 
 
@@ -549,7 +607,7 @@ def compute_vix_score(vix_val):
 def _compute_yesterday_baseline():
     """yfinance 일봉 전일 종가로부터 어제의 4대 risk 점수 재구성."""
     try:
-        y2 = _yf_prev_close("2YY=F")
+        y2 = _fetch_treasury_yield("2Y")[2] or _yf_prev_close("2YY=F")
         y10 = _yf_prev_close("^TNX")
         y30 = _yf_prev_close("^TYX")
         dxy = _yf_prev_close("DX-Y.NYB")
