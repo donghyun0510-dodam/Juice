@@ -540,9 +540,10 @@ def compute_c_risk(wti, brent, gold, copper, silver=None, btc_chg=None,
 
 
 def compute_vix_score(vix_val):
+    # 선형: VIX 12 이하 0, 40 이상 100 (정상 변동성 구간 해상도 확보 + 패닉 구간 반영)
     if vix_val is None:
         return 0
-    return max(0, min(100, (vix_val - 15) / 20 * 100))
+    return max(0, min(100, (vix_val - 12) / 28 * 100))
 
 
 def _compute_yesterday_baseline():

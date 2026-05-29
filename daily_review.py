@@ -537,10 +537,10 @@ def compute_macro_composite(t_risk_score, fx_risk_score, c_risk_score, vix_val):
     ORANGE = {"red": 1, "green": 0.5, "blue": 0}
     RED = {"red": 1, "green": 0, "blue": 0}
 
-    # VIX → 100점 환산 (선형: 15→0, 35→100)
+    # VIX → 100점 환산 (선형: 12→0, 40→100)
     vix_score = 0
     if vix_val is not None:
-        vix_score = max(0, min(100, (vix_val - 15) / 20 * 100))
+        vix_score = max(0, min(100, (vix_val - 12) / 28 * 100))
 
     total = (t_risk_score * 0.30
              + fx_risk_score * 0.25
