@@ -83,3 +83,4 @@ python daily_review.py
 - 구버전 Windows Task Scheduler(`StockReview_Global`/`StockReview_Korea`)와 로컬 `run_*.bat`은 **더 이상 사용하지 않음** (2026-05-28 `_archive/` 폴더로 이동, 히스토리 용도로 보관)
 - OAuth2 전환으로 사용하지 않게 된 `credentials.json`도 같은 시점 `_archive/`로 이동
 - `.claude/skills/` — 도담아빠 블로그 작성 3개 스킬. 호출: `/blog-kr`, `/blog-us`, `/blog-thematic`. 경제지표 해석·평균 회귀·AI Capex 프레임은 `/blog-kr`·`/blog-us`에 모두 통합됨.
+- `.claude/skills/finance-sheet/` — 구글 시트 `금융 자산 관리`(자산·부채·순자산 월별 추적) 조회·입력·관리 스킬. 호출: `/finance-sheet`. 월말 마감·입출금 기록·적금 만기/납입 처리 규약 포함(증시 리뷰 시트와 별개).
