@@ -7,6 +7,9 @@ description: "도담아빠 블로그(4genstorytelling) 국장(한국 증시) 일
 
 미장 일일 리뷰 기준 규약은 `/blog-us` 참조. 이 스킬은 KR 차이점 중심.
 
+## 학습 가이드 (필수, 작성 전 read)
+초안 작성 시작 전 `C:\Users\dongh\Desktop\주식\AI agent\.claude\skills\blog-learn\lessons\_distilled_style_guide.md`를 읽고 본 규약과 함께 적용. 이 가이드는 `/blog-learn`이 네이버 발행본 학습으로 매번 갱신함. 본 SKILL.md와 충돌 시 `_distilled_style_guide.md`가 우선.
+
 ## 시트 데이터 자동 조회 (필수, 첫 단계)
 사용자가 데이터를 채팅에 붙여넣지 않아도 아래 명령으로 오늘자 시트를 직접 조회한다:
 

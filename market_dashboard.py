@@ -88,6 +88,13 @@ from datetime import datetime, timedelta
 import time
 from concurrent.futures import ThreadPoolExecutor
 
+
+@st.cache_resource
+def _shared_executor():
+    # Streamlit Cloud 스레드 quota 보호: rerun마다 새 풀을 만들지 않고 공유 1개만 유지.
+    return ThreadPoolExecutor(max_workers=8)
+
+
 MACRO_SNAPSHOT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "macro_snapshot.json")
 PROMOTED_KR_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "promoted_kr.json")
 KR_PROMO_TRACKER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "kr_promotion_tracker.json")
@@ -786,12 +793,12 @@ def collect_all_data():
     _, data["usd_cny_chg"], data["usd_cny"] = get_price_and_change("CNY=X")
 
     # 원자재 — WTI/Gold/Copper/Silver는 Investing.com (yfinance Globex 지연 회피, 병렬 수집)
-    with ThreadPoolExecutor(max_workers=5) as ex:
-        f_wti = ex.submit(get_wti_investing)
-        f_copper = ex.submit(get_copper_investing)
-        f_gold = ex.submit(get_gold_investing)
-        f_silver = ex.submit(get_silver_investing)
-        f_brent = ex.submit(get_brent_investing)
+    ex = _shared_executor()
+    f_wti = ex.submit(get_wti_investing)
+    f_copper = ex.submit(get_copper_investing)
+    f_gold = ex.submit(get_gold_investing)
+    f_silver = ex.submit(get_silver_investing)
+    f_brent = ex.submit(get_brent_investing)
     _, data["wti_chg"], data["wti"] = f_wti.result()
     _, data["brent_chg"], data["brent"] = f_brent.result()
     _, data["copper_chg"], data["copper"] = f_copper.result()
@@ -828,11 +835,11 @@ def collect_all_data():
             data[f"{key}_chg_str"] = chg_str
             data[f"{key}_chg"] = chg_num(chg_str)
     else:
-        with ThreadPoolExecutor(max_workers=4) as ex:
-            futs = {
-                key: ex.submit(scrape_yahoo_quote, url, sym)
-                for key, (url, sym) in idx_map_fut.items()
-            }
+        ex = _shared_executor()
+        futs = {
+            key: ex.submit(scrape_yahoo_quote, url, sym)
+            for key, (url, sym) in idx_map_fut.items()
+        }
         for key, f in futs.items():
             price_str, pct_str, _, pct_val = f.result()
             data[f"{key}_price_str"] = price_str
@@ -857,13 +864,13 @@ def collect_all_data():
     data["fx_risk"] = compute_fx_risk(data["dxy"], data["usd_jpy"], data["usd_cny"])
     # 모멘텀 입력은 yfinance 일봉 간 %변동을 사용 — 실시간 슬라이딩 %change는 세션
     # 마감 후에도 값이 계속 바뀌어 daily_review 스냅샷과 대시보드 점수가 어긋남.
-    with ThreadPoolExecutor(max_workers=6) as ex:
-        f_wti_d = ex.submit(_yf_daily_pct, "CL=F")
-        f_brent_d = ex.submit(_yf_daily_pct, "BZ=F")
-        f_gold_d = ex.submit(_yf_daily_pct, "GC=F")
-        f_silver_d = ex.submit(_yf_daily_pct, "SI=F")
-        f_copper_d = ex.submit(_yf_daily_pct, "HG=F")
-        f_btc_d = ex.submit(_yf_daily_pct, "BTC-USD")
+    ex = _shared_executor()
+    f_wti_d = ex.submit(_yf_daily_pct, "CL=F")
+    f_brent_d = ex.submit(_yf_daily_pct, "BZ=F")
+    f_gold_d = ex.submit(_yf_daily_pct, "GC=F")
+    f_silver_d = ex.submit(_yf_daily_pct, "SI=F")
+    f_copper_d = ex.submit(_yf_daily_pct, "HG=F")
+    f_btc_d = ex.submit(_yf_daily_pct, "BTC-USD")
     oil_chg_avg = avg_chg(f_wti_d.result(), f_brent_d.result())
     data["c_risk"], data["oil_avg"], data["gc_ratio"] = compute_c_risk(
         data["wti"], data["brent"], data["gold"], data["copper"],
