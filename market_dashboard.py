@@ -1624,7 +1624,7 @@ with st.expander(f"원자재 — C-Risk {d['c_risk']:.0f}점 · {c_g}"):
 # ── 위험 심리 세부 (S-Risk: VIX 베이스 + 신용·금급등·달러급등 가산) ──
 _s_val = d.get("s_risk", d["vix_score"])
 v_g = risk_grade(_s_val, (30, 60, 85))
-with st.expander(f"위험 심리 — S-Risk {_s_val:.0f}점 · {v_g} (VIX {d['vix_score']:.0f} 베이스 + 신용·금·달러)"):
+with st.expander(f"위험 심리 — S-Risk {_s_val:.0f}점 · {v_g}"):
     rows = []
     if d["vix"] is not None:
         g, _ = assess_risk("VIX", d["vix"])
