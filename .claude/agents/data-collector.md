@@ -34,8 +34,11 @@ C:\Users\dongh\Desktop\주식\AI agent\
   - ⚠️ EUR/USD는 제외됨 (판정에 쓰이지 않음)
 - **원자재**: WTI(`CL=F`), Brent(`BZ=F`), Copper(investing.com 크롤링), Gold(`GC=F`)
 
-## 2. 위험 심리
-- VIX(`^VIX`), Gold(`GC=F`), BTC(`BTC-USD`)
+## 2. 위험 심리 (S-RISK 입력)
+- VIX(`^VIX`) — 베이스
+- 신용 스프레드: HYG(`HYG`) / IEF(`IEF`) 비율의 20일 추세 이탈
+- 금 급등 모멘텀: Gold(`GC=F`) 일변동 / 달러 급등 모멘텀: DXY(`DX-Y.NYB`, 환율과 공유)
+- BTC(`BTC-USD`) — 2026-06-03부터 **점수 미반영, 표시용**(위험선호 자산 배제)
 
 ## 3. 지수
 - **미국**: DOW(`^DJI`), NASDAQ(`^IXIC`), S&P500(`^GSPC`), RUSSELL2000(`^RUT`), **NQ=F (E-mini 나스닥)**
