@@ -357,10 +357,12 @@ def assess_copper_risk(current_price=None):
 
 def compute_c_risk_index(wti_val, brent_val, gold_val, copper_val,
                          oil_chg=None, gold_chg=None, silver_chg=None,
-                         copper_chg=None, btc_chg=None):
+                         copper_chg=None, btc_chg=None, legacy=False):
     """원자재 종합 위험 지수 (선형 + 단기 모멘텀)
     유가 수준(선형 0@85→30@105, 가중 2.0) + G/C 비율(선형 0@0.35→20@0.55, 가중 1.0)
-    + 단기 모멘텀(원자재·BTC 일변동 절대값 Σ max(0,|%|-2)*5, 최대 50)
+    + 단기 모멘텀(유가·구리·은 일변동, 최대 50)
+    신규(legacy=False): 금 모멘텀·BTC는 위험심리(S-Risk)로 이관돼 제외.
+    legacy=True: 구공식(금 모멘텀 + BTC 포함) — 타임시리즈 레거시 컬럼 전용.
     """
     GREEN = {"red": 0, "green": 0.6, "blue": 0}
     YELLOW = {"red": 0.8, "green": 0.8, "blue": 0}
@@ -382,8 +384,7 @@ def compute_c_risk_index(wti_val, brent_val, gold_val, copper_val,
         gc_ratio = gold_val / copper_val
         gc_score = max(0, min(25, (gc_ratio - 0.35) / 0.20 * 20))
 
-    # 단기 모멘텀 — 방향성 반영
-    # 경기 해석 변수(유가·구리)는 signed, 안전/투기 변수(금·은·BTC)는 변동성 자체를 불안 신호로 간주
+    # 단기 모멘텀 — 방향성 반영. 경기 해석 변수(유가·구리)는 signed.
     _chg = lambda c: (parse_pct(c) if isinstance(c, str) else c)
     momentum = 0
 
@@ -403,17 +404,19 @@ def compute_c_risk_index(wti_val, brent_val, gold_val, copper_val,
     if v is not None and v < -2:
         momentum += (abs(v) - 2) * 5
 
-    # 금: threshold 2% (안전자산 쏠림 민감)
-    v = _chg(gold_chg)
+    # 은: 자체 변동성 크므로 threshold 4% (노이즈 제거)
+    v = _chg(silver_chg)
     if v is not None:
-        momentum += max(0, abs(v) - 2) * 5
-
-    # 은·BTC: 자체 변동성 크므로 threshold 4% (노이즈 제거)
-    for chg in (silver_chg, btc_chg):
-        v = _chg(chg)
-        if v is None:
-            continue
         momentum += max(0, abs(v) - 4) * 5
+
+    if legacy:
+        # 구공식 전용: 금 모멘텀(threshold 2%) + BTC(threshold 4%). 신규는 S-Risk로 이관.
+        v = _chg(gold_chg)
+        if v is not None:
+            momentum += max(0, abs(v) - 2) * 5
+        v = _chg(btc_chg)
+        if v is not None:
+            momentum += max(0, abs(v) - 4) * 5
 
     momentum = min(momentum, 50)
 
@@ -424,6 +427,69 @@ def compute_c_risk_index(wti_val, brent_val, gold_val, copper_val,
     if oil_avg and gc_ratio:
         print(f"  C-Risk: 유가평균=${oil_avg:.1f}, G/C비율={gc_ratio:.3f}")
     print(f"  C-Risk: 유가={oil_score:.1f} G/C={gc_score:.1f} 모멘텀={momentum:.0f} 종합={total:.0f}점")
+
+    if total <= 30:
+        return f"안정({total:.0f}점)", GREEN, total
+    elif total <= 60:
+        return f"주의({total:.0f}점)", YELLOW, total
+    elif total <= 85:
+        return f"위험({total:.0f}점)", ORANGE, total
+    else:
+        return f"고위험({total:.0f}점)", RED, total
+
+
+def compute_vix_score(vix_val):
+    """VIX → 100점 환산 (선형: 12 이하 0, 40 이상 100)."""
+    if vix_val is None:
+        return 0
+    return max(0, min(100, (vix_val - 12) / 28 * 100))
+
+
+def fetch_credit_dev_pct(window=20):
+    """HYG/IEF 비율의 N일 SMA 대비 현재 편차%. 음수=신용경색. 실패 시 None."""
+    try:
+        h = yf.download(["HYG", "IEF"], period="3mo", progress=False, auto_adjust=True)["Close"].dropna()
+        if "HYG" not in h or "IEF" not in h or len(h) < window + 1:
+            return None
+        ratio = (h["HYG"] / h["IEF"]).dropna()
+        if len(ratio) < window:
+            return None
+        sma = float(ratio.iloc[-window:].mean())
+        cur = float(ratio.iloc[-1])
+        if sma <= 0:
+            return None
+        return (cur / sma - 1.0) * 100.0
+    except Exception:
+        return None
+
+
+def compute_s_risk_index(vix_val, credit_dev_pct=None, gold_chg=None, dxy_chg=None):
+    """위험심리 종합 지수(S-Risk): VIX 베이스 + 신용·금·달러 가산, 100 캡.
+      base=VIX_score(0~100), credit=HYG/IEF 추세이탈(0~25, dev−2.5%서 만점),
+      gold=금 급등(0~20, +1%초과*8), dollar=DXY 급등(0~15, +0.3%초과*18).
+    금·달러는 '급변(모멘텀)'만 — 레벨은 C-Risk·FX-Risk가 소유(이중계상 방지).
+    반환: (label, color, total)."""
+    GREEN = {"red": 0, "green": 0.6, "blue": 0}
+    YELLOW = {"red": 0.8, "green": 0.8, "blue": 0}
+    ORANGE = {"red": 1, "green": 0.5, "blue": 0}
+    RED = {"red": 1, "green": 0, "blue": 0}
+    _chg = lambda c: (parse_pct(c) if isinstance(c, str) else c)
+
+    base = compute_vix_score(vix_val)
+    credit = 0.0
+    if credit_dev_pct is not None:
+        credit = max(0.0, min(25.0, (-float(credit_dev_pct)) / 2.5 * 25))
+    gold = 0.0
+    g = _chg(gold_chg)
+    if g is not None:
+        gold = max(0.0, min(20.0, (g - 1.0) * 8))
+    dollar = 0.0
+    d = _chg(dxy_chg)
+    if d is not None:
+        dollar = max(0.0, min(15.0, (d - 0.3) * 18))
+
+    total = min(100.0, base + credit + gold + dollar)
+    print(f"  S-Risk: VIX={base:.0f} 신용={credit:.0f} 금={gold:.0f} 달러={dollar:.0f} 종합={total:.0f}점")
 
     if total <= 30:
         return f"안정({total:.0f}점)", GREEN, total
@@ -527,37 +593,33 @@ def compute_t_risk_index(bond_2y_val, bond_10y_val, bond_30y_val):
         return f"고위험({normalized:.0f}점)", RED, normalized
 
 
-def compute_macro_composite(t_risk_score, fx_risk_score, c_risk_score, vix_val):
+def compute_macro_composite(t_risk_score, fx_risk_score, c_risk_score, s_risk_score):
     """매크로 종합 점수
-    금리(T-Risk) 30%, 환율(FX-Risk) 25%, 원자재(C-Risk) 25%, VIX 20%
-    모두 100점 스케일로 통일 후 가중합산
+    금리(T-Risk) 30%, 환율(FX-Risk) 25%, 원자재(C-Risk) 25%, 위험심리(S-Risk) 20%
+    모두 100점 스케일로 통일 후 가중합산. (구버전은 4번째가 VIX 단독 → S-Risk로 승격)
     """
     GREEN = {"red": 0, "green": 0.6, "blue": 0}
     YELLOW = {"red": 0.8, "green": 0.8, "blue": 0}
     ORANGE = {"red": 1, "green": 0.5, "blue": 0}
     RED = {"red": 1, "green": 0, "blue": 0}
 
-    # VIX → 100점 환산 (선형: 12→0, 40→100)
-    vix_score = 0
-    if vix_val is not None:
-        vix_score = max(0, min(100, (vix_val - 12) / 28 * 100))
-
+    s_risk_score = s_risk_score or 0
     total = (t_risk_score * 0.30
              + fx_risk_score * 0.25
              + c_risk_score * 0.25
-             + vix_score * 0.20)
+             + s_risk_score * 0.20)
     total = min(total, 100)
 
-    print(f"  매크로 종합: 금리={t_risk_score:.0f} 환율={fx_risk_score:.0f} 원자재={c_risk_score:.0f} VIX={vix_score:.0f} → {total:.0f}점")
+    print(f"  매크로 종합: 금리={t_risk_score:.0f} 환율={fx_risk_score:.0f} 원자재={c_risk_score:.0f} 심리={s_risk_score:.0f} → {total:.0f}점")
 
     if total <= 25:
-        return f"안정({total:.0f}점)", GREEN, total, vix_score
+        return f"안정({total:.0f}점)", GREEN, total, s_risk_score
     elif total <= 50:
-        return f"주의({total:.0f}점)", YELLOW, total, vix_score
+        return f"주의({total:.0f}점)", YELLOW, total, s_risk_score
     elif total <= 75:
-        return f"위험({total:.0f}점)", ORANGE, total, vix_score
+        return f"위험({total:.0f}점)", ORANGE, total, s_risk_score
     else:
-        return f"고위험({total:.0f}점)", RED, total, vix_score
+        return f"고위험({total:.0f}점)", RED, total, s_risk_score
 
 
 def scan_featured_stocks(existing_tickers):
@@ -906,18 +968,35 @@ def build_global_sheet(target_date):
         _oil_pct = _brent_daily
     else:
         _oil_pct = None
+    _gold_daily = _yf_daily_pct("GC=F")
+    _silver_daily = _yf_daily_pct("SI=F")
+    _copper_daily = _yf_daily_pct("HG=F")
+    _btc_daily = _yf_daily_pct("BTC-USD")
+    _dxy_daily = _yf_daily_pct("DX-Y.NYB")
+    # C-Risk 신규(순수 상품): 금 모멘텀·BTC 제외
     c_risk_label, c_risk_color, c_risk_score = compute_c_risk_index(
         wti_val, brent_val, gold_val, copper_val,
-        oil_chg=_oil_pct,
-        gold_chg=_yf_daily_pct("GC=F"),
-        silver_chg=_yf_daily_pct("SI=F"),
-        copper_chg=_yf_daily_pct("HG=F"),
-        btc_chg=_yf_daily_pct("BTC-USD"),
+        oil_chg=_oil_pct, silver_chg=_silver_daily, copper_chg=_copper_daily,
+    )
+    # C-Risk 레거시(구공식): 금 모멘텀 + BTC 포함 — 타임시리즈 레거시 컬럼용
+    _, _, c_risk_legacy_score = compute_c_risk_index(
+        wti_val, brent_val, gold_val, copper_val,
+        oil_chg=_oil_pct, gold_chg=_gold_daily, silver_chg=_silver_daily,
+        copper_chg=_copper_daily, btc_chg=_btc_daily, legacy=True,
     )
     vix_val = parse_price(vix_price)
     vix_risk, vix_color = assess_risk("VIX", vix_val)
-    macro_label, macro_color, macro_total_val, vix_score_val = compute_macro_composite(
-        t_risk_score, fx_risk_score, c_risk_score, vix_val
+    vix_score_val = compute_vix_score(vix_val)
+    # S-Risk: 위험심리 종합 (VIX + 신용 + 금급등 + 달러급등)
+    _credit_dev = fetch_credit_dev_pct()
+    s_risk_label, s_risk_color, s_risk_score = compute_s_risk_index(
+        vix_val, credit_dev_pct=_credit_dev, gold_chg=_gold_daily, dxy_chg=_dxy_daily,
+    )
+    macro_label, macro_color, macro_total_val, _ = compute_macro_composite(
+        t_risk_score, fx_risk_score, c_risk_score, s_risk_score
+    )
+    macro_total_legacy_val = min(
+        t_risk_score * 0.30 + fx_risk_score * 0.25 + c_risk_legacy_score * 0.25 + vix_score_val * 0.20, 100
     )
 
     # 성과 추적용 메트릭 (스카우터_성과자료 시트에 누적 기록)
@@ -937,7 +1016,10 @@ def build_global_sheet(target_date):
         "fx_risk": round(fx_risk_score, 1) if fx_risk_score is not None else "",
         "c_risk": round(c_risk_score, 1) if c_risk_score is not None else "",
         "vix_score": round(vix_score_val, 1) if vix_score_val is not None else "",
+        "s_risk": round(s_risk_score, 1) if s_risk_score is not None else "",
         "macro_total": round(macro_total_val, 1) if macro_total_val is not None else "",
+        "c_risk_legacy": round(c_risk_legacy_score, 1) if c_risk_legacy_score is not None else "",
+        "macro_total_legacy": round(macro_total_legacy_val, 1) if macro_total_legacy_val is not None else "",
         "vix": round(vix_val, 2) if vix_val is not None else "",
         "dxy": round(dxy_val, 2) if dxy_val is not None else "",
         "us_10y": round(bond_10y_val, 3) if bond_10y_val is not None else "",
@@ -1005,6 +1087,8 @@ def build_global_sheet(target_date):
     if vix_color: risk_cells.append((len(rows), vix_color))
     rows.append(["", "", "GOLD", gold_price, gold_chg, ""])
     rows.append(["", "", "BITCOIN", btc_price, btc_chg, ""])
+    rows.append(["", "", "위험심리 종합 경보", "", "", s_risk_label])
+    if s_risk_color: risk_cells.append((len(rows), s_risk_color))
     rows.append(["", "", "", "", "", ""])
     rows.append(["", "★ 매크로 종합", "", "", "", macro_label])
     if macro_color: risk_cells.append((len(rows), macro_color))
@@ -1859,10 +1943,12 @@ def build_korea_sheet(target_date):
 
 # ── 메인 실행 ──
 PERF_SHEET_NAME = "스카우터_성과자료"
+# 기존 컬럼(C-RISK·VIX점수·매크로종합)은 레거시 공식으로 연속 유지.
+# 신규 공식(BTC 제외 C-Risk + S-Risk)은 끝쪽 _v2/S-RISK 컬럼에 적재.
 PERF_HEADERS = ["날짜", "T-RISK", "FX-RISK", "C-RISK", "VIX점수", "매크로종합",
-                "S&P500 종가", "S&P500 일변동%"]
-PERF_KEYS = ["date", "t_risk", "fx_risk", "c_risk", "vix_score", "macro_total",
-             "sp500_close", "sp500_chg_pct"]
+                "S&P500 종가", "S&P500 일변동%", "C-RISK_v2", "S-RISK", "매크로종합_v2"]
+PERF_KEYS = ["date", "t_risk", "fx_risk", "c_risk_legacy", "vix_score", "macro_total_legacy",
+             "sp500_close", "sp500_chg_pct", "c_risk", "s_risk", "macro_total"]
 
 
 def append_performance_log(perf):

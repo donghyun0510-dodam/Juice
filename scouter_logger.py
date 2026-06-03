@@ -21,7 +21,7 @@ MACRO_SNAPSHOT_PATH = os.path.join(BASE_DIR, "macro_snapshot.json")
 def _update_macro_snapshot(scores: dict) -> None:
     """미국 종가 직후 cron(KST 05:17) 시점의 점수를 yesterday_final로 고정.
     대시보드를 열지 않아도 baseline이 매일 갱신되어 일일 변동치가 누적되지 않게 한다."""
-    keys = ["t_risk", "fx_risk", "c_risk", "vix_score", "macro_total"]
+    keys = ["t_risk", "fx_risk", "c_risk", "vix_score", "s_risk", "macro_total"]
     final = {k: scores.get(k) for k in keys if scores.get(k) is not None}
     if not final:
         return
@@ -42,9 +42,9 @@ def main():
     scores = collect_macro_scores()
 
     # 디버그 로그
-    keys = ["t_risk", "fx_risk", "c_risk", "vix_score", "macro_total"]
+    keys = ["t_risk", "fx_risk", "c_risk", "vix_score", "s_risk", "macro_total"]
     print("[scouter_logger] scores={"
-          + ", ".join(f"'{k}': {round(scores[k], 2)}" for k in keys)
+          + ", ".join(f"'{k}': {round(scores[k], 2)}" for k in keys if scores.get(k) is not None)
           + "}", flush=True)
     print(f"[inputs] y2={scores['y2']} y10={scores['y10']} y30={scores['y30']} "
           f"| dxy={scores['dxy']} jpy={scores['jpy']} cny={scores['cny']}", flush=True)
@@ -62,7 +62,8 @@ def main():
         return 1
 
     from notifier import log_timeseries_if_due, check_and_notify_macro
-    payload = {k: scores[k] for k in keys}
+    payload_keys = keys + ["c_risk_legacy", "macro_total_legacy"]
+    payload = {k: scores.get(k) for k in payload_keys if scores.get(k) is not None}
     log_timeseries_if_due(payload)
     check_and_notify_macro(scores.get("macro_total"), scores=payload)
     _update_macro_snapshot(payload)

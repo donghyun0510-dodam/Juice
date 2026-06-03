@@ -543,7 +543,13 @@ def compute_fx_risk(dxy, jpy, cny):
 
 
 def compute_c_risk(wti, brent, gold, copper, silver=None, btc_chg=None,
-                   oil_chg=None, gold_chg=None, silver_chg=None, copper_chg=None):
+                   oil_chg=None, gold_chg=None, silver_chg=None, copper_chg=None,
+                   legacy=False):
+    """원자재 종합 위험 지수.
+    신규(legacy=False): 순수 상품만 — 유가 레벨·G/C 레벨 + 유가/구리/은 모멘텀.
+      금 모멘텀·BTC는 위험심리(S-Risk)로 이관돼 여기서 제외.
+    legacy=True: 구공식(금 모멘텀 + BTC 포함). 타임시리즈 레거시 컬럼 연속성 전용.
+    """
     oil_score = 0
     oil_avg = None
     if wti is not None and brent is not None:
@@ -559,8 +565,7 @@ def compute_c_risk(wti, brent, gold, copper, silver=None, btc_chg=None,
         gc_ratio = gold / copper
         gc_score = max(0, min(25, (gc_ratio - 0.35) / 0.20 * 20))
 
-    # 단기 모멘텀 — 방향성 반영
-    # 경기 해석 변수(유가·구리)는 signed, 안전/투기 변수(금·은·BTC)는 변동성 자체를 불안 신호로 간주
+    # 단기 모멘텀 — 방향성 반영. 경기 해석 변수(유가·구리)는 signed.
     momentum = 0
 
     # 유가: 상승만 가산(인플레 재점화). 중립선(85) 위에서 급락은 oil_score 상쇄(인플레 완화 신호).
@@ -579,17 +584,19 @@ def compute_c_risk(wti, brent, gold, copper, silver=None, btc_chg=None,
     if v is not None and v < -2:
         momentum += (abs(v) - 2) * 5
 
-    # 금: threshold 2% (안전자산 쏠림 민감)
-    v = chg_num(gold_chg)
+    # 은: 자체 변동성 크므로 threshold 4% (노이즈 제거)
+    v = chg_num(silver_chg)
     if v is not None:
-        momentum += max(0, abs(v) - 2) * 5
-
-    # 은·BTC: 자체 변동성 크므로 threshold 4% (노이즈 제거)
-    for chg in (silver_chg, btc_chg):
-        v = chg_num(chg)
-        if v is None:
-            continue
         momentum += max(0, abs(v) - 4) * 5
+
+    if legacy:
+        # 구공식 전용: 금 모멘텀(threshold 2%) + BTC(threshold 4%). 신규는 S-Risk로 이관.
+        v = chg_num(gold_chg)
+        if v is not None:
+            momentum += max(0, abs(v) - 2) * 5
+        v = chg_num(btc_chg)
+        if v is not None:
+            momentum += max(0, abs(v) - 4) * 5
 
     momentum = min(momentum, 50)
 
@@ -602,6 +609,52 @@ def compute_vix_score(vix_val):
     if vix_val is None:
         return 0
     return max(0, min(100, (vix_val - 12) / 28 * 100))
+
+
+def fetch_credit_dev_pct(window=20):
+    """HYG/IEF 비율의 N일 SMA 대비 현재 편차%. 음수=신용경색(HY가 추세 이탈 하락).
+    데이터 부족·실패 시 None → S-Risk credit 가산 0."""
+    try:
+        import yfinance as yf
+        h = yf.download(["HYG", "IEF"], period="3mo", progress=False, auto_adjust=True)["Close"].dropna()
+        if "HYG" not in h or "IEF" not in h or len(h) < window + 1:
+            return None
+        ratio = (h["HYG"] / h["IEF"]).dropna()
+        if len(ratio) < window:
+            return None
+        sma = float(ratio.iloc[-window:].mean())
+        cur = float(ratio.iloc[-1])
+        if sma <= 0:
+            return None
+        return (cur / sma - 1.0) * 100.0
+    except Exception:
+        return None
+
+
+def compute_s_risk(vix_val, credit_dev_pct=None, gold_chg=None, dxy_chg=None):
+    """위험심리 종합 지수(S-Risk): VIX 베이스 + 신용·금·달러 가산, 100 캡.
+      base   = VIX_score (0~100)
+      credit = HYG/IEF 20일 SMA 대비 하락 이탈 (0~25, dev −2.5%서 만점)
+      gold   = 금 일변동 상승분 (0~20, +1% 초과 *8, +3.5%서 만점) — 안전자산 쏠림
+      dollar = DXY 일변동 상승분 (0~15, +0.3% 초과 *18, +1.13%서 만점) — 달러 도피
+    금·달러는 '레벨'이 아닌 '급변(모멘텀)'만 반영 — 레벨은 각각 C-Risk·FX-Risk가 소유(이중계상 방지)."""
+    base = compute_vix_score(vix_val)
+
+    credit = 0.0
+    if credit_dev_pct is not None:
+        credit = max(0.0, min(25.0, (-float(credit_dev_pct)) / 2.5 * 25))
+
+    gold = 0.0
+    g = chg_num(gold_chg)
+    if g is not None:
+        gold = max(0.0, min(20.0, (g - 1.0) * 8))
+
+    dollar = 0.0
+    d = chg_num(dxy_chg)
+    if d is not None:
+        dollar = max(0.0, min(15.0, (d - 0.3) * 18))
+
+    return min(100.0, base + credit + gold + dollar)
 
 
 def _compute_yesterday_baseline():
@@ -623,11 +676,16 @@ def _compute_yesterday_baseline():
         _, t_risk, _ = compute_t_risk(y2, y10, y30)
         fx_risk = compute_fx_risk(dxy, jpy, cny)
         c_risk, _, _ = compute_c_risk(wti, brent, gold, copper_ton)
+        c_risk_legacy, _, _ = compute_c_risk(wti, brent, gold, copper_ton, legacy=True)
         vix_score = compute_vix_score(vix)
-        macro_total = min(t_risk * 0.30 + fx_risk * 0.25 + c_risk * 0.25 + vix_score * 0.20, 100)
+        # 베이스라인(전일 종가)은 모멘텀 재구성 곤란 → S-Risk는 VIX+신용만 근사
+        s_risk = compute_s_risk(vix, credit_dev_pct=fetch_credit_dev_pct())
+        macro_total = min(t_risk * 0.30 + fx_risk * 0.25 + c_risk * 0.25 + s_risk * 0.20, 100)
+        macro_total_legacy = min(t_risk * 0.30 + fx_risk * 0.25 + c_risk_legacy * 0.25 + vix_score * 0.20, 100)
         return {
             "t_risk": t_risk, "fx_risk": fx_risk, "c_risk": c_risk,
-            "vix_score": vix_score, "macro_total": macro_total,
+            "vix_score": vix_score, "s_risk": s_risk, "macro_total": macro_total,
+            "c_risk_legacy": c_risk_legacy, "macro_total_legacy": macro_total_legacy,
         }
     except Exception:
         return {}
@@ -696,17 +754,29 @@ def collect_macro_scores() -> dict:
     copper_daily = f_copper_d.result()
     btc_daily = f_btc_d.result()
     oil_chg_avg = avg_chg(wti_daily, brent_daily)
+    dxy_daily = _yf_daily_pct("DX-Y.NYB")
+    credit_dev = fetch_credit_dev_pct()
     _, t_risk, _ = compute_t_risk(y2, y10, y30)
     fx_risk = compute_fx_risk(dxy, jpy, cny)
     c_risk, oil_avg, gc_ratio = compute_c_risk(
         wti, brent, gold, copper,
+        silver=silver,
+        oil_chg=oil_chg_avg, silver_chg=silver_daily, copper_chg=copper_daily,
+    )
+    c_risk_legacy, _, _ = compute_c_risk(
+        wti, brent, gold, copper,
         silver=silver, btc_chg=btc_daily,
         oil_chg=oil_chg_avg, gold_chg=gold_daily,
         silver_chg=silver_daily, copper_chg=copper_daily,
+        legacy=True,
     )
     vix_score = compute_vix_score(vix)
+    s_risk = compute_s_risk(vix, credit_dev_pct=credit_dev, gold_chg=gold_daily, dxy_chg=dxy_daily)
     macro_total = min(
-        t_risk * 0.30 + fx_risk * 0.25 + c_risk * 0.25 + vix_score * 0.20, 100
+        t_risk * 0.30 + fx_risk * 0.25 + c_risk * 0.25 + s_risk * 0.20, 100
+    )
+    macro_total_legacy = min(
+        t_risk * 0.30 + fx_risk * 0.25 + c_risk_legacy * 0.25 + vix_score * 0.20, 100
     )
 
     return {
@@ -714,8 +784,12 @@ def collect_macro_scores() -> dict:
         "fx_risk": fx_risk,
         "c_risk": c_risk,
         "vix_score": vix_score,
+        "s_risk": s_risk,
         "macro_total": macro_total,
+        "c_risk_legacy": c_risk_legacy,
+        "macro_total_legacy": macro_total_legacy,
         # 디버그·참조용
+        "credit_dev": credit_dev, "dxy_chg_daily": dxy_daily,
         "y2": y2, "y10": y10, "y30": y30,
         "dxy": dxy, "jpy": jpy, "cny": cny,
         "wti": wti, "brent": brent, "gold": gold, "copper": copper, "silver": silver,

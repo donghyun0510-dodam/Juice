@@ -22,7 +22,9 @@ GRADE_ORDER = ["안정", "주의", "위험", "고위험"]
 TIMESERIES_SHEET_NAME = "스카우터_매크로_타임시리즈"
 PERF_FOLDER_ID = os.environ.get("GSHEET_FOLDER_ID", "1oCzJUMAklZwXqBR67CmvzmFdZGg3wLuv")
 PERF_HEADERS = ["날짜", "T-RISK", "FX-RISK", "C-RISK", "VIX점수", "매크로종합",
-                "매크로종합 변동", "S&P500 종가", "S&P500 변동(%)", "구분"]
+                "매크로종합 변동", "S&P500 종가", "S&P500 변동(%)", "구분",
+                "C-RISK_v2", "S-RISK", "매크로종합_v2",
+                "매크로종합_v2 변동", "S&P500 종가", "S&P500 변동(%)"]
 TIMESERIES_INTERVAL_MIN = 1320  # 22h — 일 1회 (KST 05:00) 가드
 STATE_SHEET_NAME = "스카우터_알림상태"
 
@@ -228,12 +230,25 @@ def _append_row_to_sheet(sheet_name: str, scores: dict) -> bool:
                         sp500_diff = (sp500_close - prev_close_row) / prev_close_row * 100
                 except Exception:
                     pass
+        # 기존 컬럼(C-RISK·VIX점수·매크로종합)은 레거시 공식으로 연속 유지.
+        # 신규 공식(BTC 제외 C-Risk + S-Risk)은 끝쪽 _v2/S-RISK 컬럼에 적재.
+        c_risk_legacy = scores.get("c_risk_legacy", scores.get("c_risk"))
+        macro_legacy = scores.get("macro_total_legacy", scores.get("macro_total"))
         if prev_row is not None and len(prev_row) >= 6:
             m = _re.search(r"-?\d+(?:\.\d+)?", str(prev_row[5]).replace(",", ""))
-            cur_total = scores.get("macro_total")
-            if m and cur_total is not None:
+            if m and macro_legacy is not None:
                 try:
-                    macro_delta = float(cur_total) - float(m.group())
+                    macro_delta = float(macro_legacy) - float(m.group())
+                except Exception:
+                    pass
+        # 신규(v2) 블록의 매크로종합 변동 — 직전 행 매크로종합_v2(M=idx 12) 대비
+        macro_v2 = scores.get("macro_total")
+        macro_v2_delta = None
+        if prev_row is not None and len(prev_row) >= 13:
+            m = _re.search(r"-?\d+(?:\.\d+)?", str(prev_row[12]).replace(",", ""))
+            if m and macro_v2 is not None:
+                try:
+                    macro_v2_delta = float(macro_v2) - float(m.group())
                 except Exception:
                     pass
 
@@ -251,13 +266,19 @@ def _append_row_to_sheet(sheet_name: str, scores: dict) -> bool:
             ts_label,
             _r(scores.get("t_risk")),
             _r(scores.get("fx_risk")),
-            _r(scores.get("c_risk")),
+            _r(c_risk_legacy),
             _r(scores.get("vix_score")),
-            _r(scores.get("macro_total")),
+            _r(macro_legacy),
             _r(macro_delta, 1),
             sp500_close_label,
             _r(sp500_diff, 2),
             sp500_kind_label,
+            _r(scores.get("c_risk")),       # C-RISK_v2 (신규: BTC·금모멘텀 제외)
+            _r(scores.get("s_risk")),        # S-RISK (위험심리 종합)
+            _r(scores.get("macro_total")),   # 매크로종합_v2 (신규)
+            _r(macro_v2_delta, 1),           # 매크로종합_v2 변동 (G열 대응)
+            sp500_close_label,               # S&P500 종가 (H열 대응)
+            _r(sp500_diff, 2),               # S&P500 변동(%) (I열 대응)
         ]
         ws.append_row(row)
         print(f"[notifier] {sheet_name} 기록 추가: {ts_label}")

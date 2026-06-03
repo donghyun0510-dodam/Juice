@@ -576,7 +576,10 @@ def compute_fx_risk(dxy, jpy, cny):
 
 
 def compute_c_risk(wti, brent, gold, copper, silver=None, btc_chg=None,
-                   oil_chg=None, gold_chg=None, silver_chg=None, copper_chg=None):
+                   oil_chg=None, gold_chg=None, silver_chg=None, copper_chg=None,
+                   legacy=False):
+    """원자재 종합 위험 지수. 신규(legacy=False): 유가·G/C 레벨 + 유가/구리/은 모멘텀.
+    금 모멘텀·BTC는 S-Risk로 이관돼 제외. legacy=True: 구공식(금 모멘텀+BTC 포함)."""
     # 1) 유가 수준: 85→0, 105→30 선형, 이후 외삽 (캡 40)
     oil_score = 0
     oil_avg = None
@@ -596,8 +599,7 @@ def compute_c_risk(wti, brent, gold, copper, silver=None, btc_chg=None,
         # 0.35→0, 0.55→20 선형, 극단값 캡
         gc_score = max(0, min(25, (gc_ratio - 0.35) / 0.20 * 20))
 
-    # 3) 단기 모멘텀 — 방향성 반영
-    # 경기 해석 변수(유가·구리)는 signed, 안전/투기 변수(금·은·BTC)는 변동성 자체를 불안 신호로 간주
+    # 3) 단기 모멘텀 — 방향성 반영. 경기 해석 변수(유가·구리)는 signed.
     momentum = 0
 
     # 유가: 상승만 가산(인플레 재점화). 중립선(85) 위에서 급락은 oil_score 상쇄(인플레 완화 신호).
@@ -616,17 +618,19 @@ def compute_c_risk(wti, brent, gold, copper, silver=None, btc_chg=None,
     if v is not None and v < -2:
         momentum += (abs(v) - 2) * 5
 
-    # 금: threshold 2% (안전자산 쏠림 민감)
-    v = chg_num(gold_chg)
+    # 은: 자체 변동성 크므로 threshold 4% (노이즈 제거)
+    v = chg_num(silver_chg)
     if v is not None:
-        momentum += max(0, abs(v) - 2) * 5
-
-    # 은·BTC: 자체 변동성 크므로 threshold 4% (노이즈 제거)
-    for chg in (silver_chg, btc_chg):
-        v = chg_num(chg)
-        if v is None:
-            continue
         momentum += max(0, abs(v) - 4) * 5
+
+    if legacy:
+        # 구공식 전용: 금 모멘텀(threshold 2%) + BTC(threshold 4%). 신규는 S-Risk로 이관.
+        v = chg_num(gold_chg)
+        if v is not None:
+            momentum += max(0, abs(v) - 2) * 5
+        v = chg_num(btc_chg)
+        if v is not None:
+            momentum += max(0, abs(v) - 4) * 5
 
     momentum = min(momentum, 50)
 
@@ -640,6 +644,45 @@ def compute_vix_score(vix_val):
     if vix_val is None:
         return 0
     return max(0, min(100, (vix_val - 12) / 28 * 100))
+
+
+def fetch_credit_dev_pct(window=20):
+    """HYG/IEF 비율의 N일 SMA 대비 현재 편차%. 음수=신용경색. 실패 시 None."""
+    try:
+        import yfinance as yf
+        h = yf.download(["HYG", "IEF"], period="3mo", progress=False, auto_adjust=True)["Close"].dropna()
+        if "HYG" not in h or "IEF" not in h or len(h) < window + 1:
+            return None
+        ratio = (h["HYG"] / h["IEF"]).dropna()
+        if len(ratio) < window:
+            return None
+        sma = float(ratio.iloc[-window:].mean())
+        cur = float(ratio.iloc[-1])
+        if sma <= 0:
+            return None
+        return (cur / sma - 1.0) * 100.0
+    except Exception:
+        return None
+
+
+def compute_s_risk(vix_val, credit_dev_pct=None, gold_chg=None, dxy_chg=None):
+    """위험심리 종합 지수(S-Risk): VIX 베이스 + 신용·금·달러 가산, 100 캡.
+      base=VIX_score(0~100), credit=HYG/IEF 추세이탈(0~25, dev−2.5%서 만점),
+      gold=금 급등(0~20, +1%초과*8), dollar=DXY 급등(0~15, +0.3%초과*18).
+    금·달러는 '급변(모멘텀)'만 — 레벨은 C-Risk·FX-Risk가 소유(이중계상 방지)."""
+    base = compute_vix_score(vix_val)
+    credit = 0.0
+    if credit_dev_pct is not None:
+        credit = max(0.0, min(25.0, (-float(credit_dev_pct)) / 2.5 * 25))
+    gold = 0.0
+    g = chg_num(gold_chg)
+    if g is not None:
+        gold = max(0.0, min(20.0, (g - 1.0) * 8))
+    dollar = 0.0
+    d = chg_num(dxy_chg)
+    if d is not None:
+        dollar = max(0.0, min(15.0, (d - 0.3) * 18))
+    return min(100.0, base + credit + gold + dollar)
 
 
 def risk_grade(score, thresholds=(25, 50, 75)):
@@ -765,11 +808,16 @@ def _compute_yesterday_baseline():
         _, t_risk, _ = compute_t_risk(y2, y10, y30)
         fx_risk = compute_fx_risk(dxy, jpy, cny)
         c_risk, _, _ = compute_c_risk(wti, brent, gold, copper_ton)
+        c_risk_legacy, _, _ = compute_c_risk(wti, brent, gold, copper_ton, legacy=True)
         vix_score = compute_vix_score(vix)
-        macro_total = min(t_risk * 0.30 + fx_risk * 0.25 + c_risk * 0.25 + vix_score * 0.20, 100)
+        # 베이스라인은 모멘텀 재구성 곤란 → S-Risk는 VIX+신용만 근사
+        s_risk = compute_s_risk(vix, credit_dev_pct=fetch_credit_dev_pct())
+        macro_total = min(t_risk * 0.30 + fx_risk * 0.25 + c_risk * 0.25 + s_risk * 0.20, 100)
+        macro_total_legacy = min(t_risk * 0.30 + fx_risk * 0.25 + c_risk_legacy * 0.25 + vix_score * 0.20, 100)
         return {
             "t_risk": t_risk, "fx_risk": fx_risk, "c_risk": c_risk,
-            "vix_score": vix_score, "macro_total": macro_total,
+            "vix_score": vix_score, "s_risk": s_risk, "macro_total": macro_total,
+            "c_risk_legacy": c_risk_legacy, "macro_total_legacy": macro_total_legacy,
         }
     except Exception:
         return {}
@@ -871,25 +919,48 @@ def collect_all_data():
     f_silver_d = ex.submit(_yf_daily_pct, "SI=F")
     f_copper_d = ex.submit(_yf_daily_pct, "HG=F")
     f_btc_d = ex.submit(_yf_daily_pct, "BTC-USD")
+    f_dxy_d = ex.submit(_yf_daily_pct, "DX-Y.NYB")
+    f_credit = ex.submit(fetch_credit_dev_pct)
     oil_chg_avg = avg_chg(f_wti_d.result(), f_brent_d.result())
+    _gold_d = f_gold_d.result()
+    _silver_d = f_silver_d.result()
+    _copper_d = f_copper_d.result()
+    _btc_d = f_btc_d.result()
+    _dxy_d = f_dxy_d.result()
+    _credit_dev = f_credit.result()
+    # C-Risk 신규(순수 상품): 금 모멘텀·BTC 제외
     data["c_risk"], data["oil_avg"], data["gc_ratio"] = compute_c_risk(
         data["wti"], data["brent"], data["gold"], data["copper"],
         silver=data.get("silver"),
-        btc_chg=f_btc_d.result(),
-        oil_chg=oil_chg_avg,
-        gold_chg=f_gold_d.result(),
-        silver_chg=f_silver_d.result(),
-        copper_chg=f_copper_d.result(),
+        oil_chg=oil_chg_avg, silver_chg=_silver_d, copper_chg=_copper_d,
+    )
+    # C-Risk 레거시(구공식): 금 모멘텀 + BTC 포함 — 타임시리즈 레거시 컬럼용
+    data["c_risk_legacy"], _, _ = compute_c_risk(
+        data["wti"], data["brent"], data["gold"], data["copper"],
+        silver=data.get("silver"), btc_chg=_btc_d,
+        oil_chg=oil_chg_avg, gold_chg=_gold_d,
+        silver_chg=_silver_d, copper_chg=_copper_d, legacy=True,
     )
     data["vix_score"] = compute_vix_score(data["vix"])
+    data["credit_dev"] = _credit_dev
+    data["s_risk"] = compute_s_risk(
+        data["vix"], credit_dev_pct=_credit_dev, gold_chg=_gold_d, dxy_chg=_dxy_d
+    )
 
-    data["macro_total"] = (
+    data["macro_total"] = min(
         data["t_risk"] * 0.30
         + data["fx_risk"] * 0.25
         + data["c_risk"] * 0.25
-        + data["vix_score"] * 0.20
+        + data["s_risk"] * 0.20,
+        100,
     )
-    data["macro_total"] = min(data["macro_total"], 100)
+    data["macro_total_legacy"] = min(
+        data["t_risk"] * 0.30
+        + data["fx_risk"] * 0.25
+        + data["c_risk_legacy"] * 0.25
+        + data["vix_score"] * 0.20,
+        100,
+    )
 
     # 하위 지수 점수 변화 (어제 마지막 값 대비)
     today_str = datetime.now().strftime("%Y-%m-%d")
@@ -906,6 +977,7 @@ def collect_all_data():
         "fx_risk": data["fx_risk"],
         "c_risk": data["c_risk"],
         "vix_score": data["vix_score"],
+        "s_risk": data["s_risk"],
         "macro_total": data["macro_total"],
     }
 
@@ -973,7 +1045,7 @@ def generate_diagnosis(d):
         "금리": d["t_risk"],
         "환율": d["fx_risk"],
         "원자재": d["c_risk"],
-        "VIX": d["vix_score"],
+        "위험심리": d.get("s_risk", d["vix_score"]),
     }
     top = max(factors, key=factors.get)
     bottom = min(factors, key=factors.get)
@@ -1418,7 +1490,7 @@ sub_indices = [
     ("T-RISK", "금리", d["t_risk"], 100, (25, 50, 75), d.get("t_risk_delta")),
     ("FX-RISK", "환율", d["fx_risk"], 100, (30, 60, 85), d.get("fx_risk_delta")),
     ("C-RISK", "원자재", d["c_risk"], 100, (30, 60, 85), d.get("c_risk_delta")),
-    ("VIX", "위험심리", d["vix_score"], 100, (25, 50, 75), d.get("vix_score_delta")),
+    ("S-RISK", "위험심리", d.get("s_risk", d["vix_score"]), 100, (30, 60, 85), d.get("s_risk_delta")),
 ]
 
 def _delta_html(delta):
@@ -1549,21 +1621,26 @@ with st.expander(f"원자재 — C-Risk {d['c_risk']:.0f}점 · {c_g}"):
         rows.append((_tt("Gold/Copper Ratio", "Gold ÷ Copper", "계산값", "금/구리 비율 (높을수록 경기 둔화 시그널)"), f"{gcr:.3f}{trend_arrow(gcr_chg)}", badge_html(gcg)))
     st.markdown(detail_table(rows), unsafe_allow_html=True)
 
-# ── 위험 심리 세부 ──
-v_g = risk_grade(d["vix_score"], (25, 50, 75))
-with st.expander(f"위험 심리 — VIX Score {d['vix_score']:.0f}점 · {v_g}"):
+# ── 위험 심리 세부 (S-Risk: VIX 베이스 + 신용·금급등·달러급등 가산) ──
+_s_val = d.get("s_risk", d["vix_score"])
+v_g = risk_grade(_s_val, (30, 60, 85))
+with st.expander(f"위험 심리 — S-Risk {_s_val:.0f}점 · {v_g} (VIX {d['vix_score']:.0f} 베이스 + 신용·금·달러)"):
     rows = []
     if d["vix"] is not None:
         g, _ = assess_risk("VIX", d["vix"])
         if d.get("vix_is_futures"):
-            vix_label = _tt("CBOE VIX (선물)", "^VIX", "yfinance", "VIX 선물 (현물 폐장 시)")
+            vix_label = _tt("CBOE VIX (선물)", "^VIX", "yfinance", "VIX 선물 (현물 폐장 시) — S-Risk 베이스")
         else:
-            vix_label = _tt("CBOE VIX", "^VIX", "yfinance", "CBOE 변동성 지수 (공포지수)")
+            vix_label = _tt("CBOE VIX", "^VIX", "yfinance", "CBOE 변동성 지수 (공포지수) — S-Risk 베이스")
         rows.append((vix_label, f"{d['vix']:.2f}{trend_arrow(d.get('vix_chg'))}", badge_html(g)))
+    _cd = d.get("credit_dev")
+    if _cd is not None:
+        _cg = "위험" if _cd <= -1.5 else ("주의" if _cd < 0 else "안정")
+        rows.append((_tt("신용 스프레드", "HYG/IEF", "yfinance", "HY채권/국채 비율의 20일 추세 대비 편차% (음수=신용경색)"), f"{_cd:+.2f}%", badge_html(_cg)))
     if d["gold"] is not None:
-        rows.append((_tt("Gold", "GC=F", "yfinance (15분 지연)", "금 선물"), f"${d['gold']:,.0f}{trend_arrow(d.get('gold_chg_str'))}", d.get("gold_chg_str", "")))
+        rows.append((_tt("Gold (안전선호)", "GC=F", "yfinance (15분 지연)", "금 선물 — 급등 시 S-Risk 가산(안전자산 쏠림)"), f"${d['gold']:,.0f}{trend_arrow(d.get('gold_chg_str'))}", d.get("gold_chg_str", "")))
     if d["btc"] is not None:
-        rows.append((_tt("Bitcoin", "BTC-USD", "yfinance", "비트코인 가격"), f"${d['btc']:,.0f}{trend_arrow(d.get('btc_chg_str'))}", d.get("btc_chg_str", "")))
+        rows.append((_tt("Bitcoin (참고)", "BTC-USD", "yfinance", "비트코인 — S-Risk·C-Risk 점수 미반영(표시용)"), f"${d['btc']:,.0f}{trend_arrow(d.get('btc_chg_str'))}", d.get("btc_chg_str", "")))
     st.markdown(detail_table(rows), unsafe_allow_html=True)
 
 # ── 지수 동향 ──
