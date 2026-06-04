@@ -247,11 +247,13 @@ def scan_sp500(exclude_set):
 
 def scan_kr(exclude_set):
     """KOSPI/KOSDAQ 시총 3조원+ 중 추적 종목 외에서 Long sign 발생 종목 스캔.
-    반환: (long_only: {ticker: info}, name_map: {ticker: name}, err)"""
-    import yfinance as yf
+    반환: (long_only: {ticker: info}, name_map: {ticker: name}, err)
+    시총(info["mcap"], KRW)은 네이버 시세 페이지의 억원 값을 그대로 환산해 주입.
+    (yfinance fast_info 는 KR 종목에서 market_cap=0 을 반환해 사용하지 않음)"""
     from bs4 import BeautifulSoup
     candidates = []
     name_map = {}
+    mcap_eok_map = {}  # ticker -> 시총(억원), 네이버 시세 페이지 파싱값
     try:
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
         for market in ["0", "1"]:  # 0=KOSPI, 1=KOSDAQ
@@ -293,16 +295,14 @@ def scan_kr(exclude_set):
                         continue
                     candidates.append(ticker)
                     name_map[ticker] = name
+                    mcap_eok_map[ticker] = mcap_100m
     except Exception as e:
         return {}, {}, str(e)
     candidates = list(dict.fromkeys(candidates))
     sig = analyze_trend_signals(candidates)
     long_only = {t: info for t, info in sig.items() if info["tag"] == "long"}
-    # 시총 정보 주입 (fast_info 로 정확한 KRW)
+    # 시총 주입: 네이버 억원 값 → KRW (억원 × 1e8). 조원 = mcap / 1e12.
     for t, info in long_only.items():
-        try:
-            info["mcap"] = yf.Ticker(t).fast_info.get("market_cap") or 0
-        except Exception:
-            info["mcap"] = 0
+        info["mcap"] = mcap_eok_map.get(t, 0) * 100_000_000
     name_out = {t: name_map.get(t, t) for t in long_only}
     return long_only, name_out, None
