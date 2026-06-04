@@ -1862,9 +1862,11 @@ def _is_kr_ticker(t: str) -> bool:
     return t.endswith(".KS") or t.endswith(".KQ")
 
 
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=600, max_entries=64)
 def _fetch_kr_daily(ticker: str):
-    """한국 종목 일봉 (Naver 경유 FDR). ticker="005930.KS" → code="005930"."""
+    """한국 종목 일봉 (Naver 경유 FDR). ticker="005930.KS" → code="005930".
+    추적 종목·승격 종목 등 소규모에만 사용(풀스캔은 Actions long_scan.py로 분리).
+    max_entries 로 캐시에 쌓이는 DataFrame 수를 제한해 메모리 누적을 차단."""
     try:
         import FinanceDataReader as fdr
         import pandas as pd
@@ -2222,28 +2224,6 @@ def get_market_caps(tickers):
             continue
     return caps
 
-@st.cache_data(ttl=3600)
-def _scan_sp500_long_signs_raw(exclude_set):
-    """S&P500 중 추적 종목 외에서 Long sign 발생 종목 스캔 (내부, 무거움).
-    상위 scan_sp500_long_signs 에서 장종료 후 1회만 호출되도록 게이팅."""
-    try:
-        import pandas as pd
-        from io import StringIO
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-        r = req.get("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies", headers=headers, timeout=10)
-        r.raise_for_status()
-        tables = pd.read_html(StringIO(r.text))
-        sp500_df = tables[0]
-        sp500_df["Ticker"] = sp500_df["Symbol"].str.replace(".", "-", regex=False)
-        candidates = [t for t in sp500_df["Ticker"].tolist() if t not in exclude_set]
-        sector_map = dict(zip(sp500_df["Ticker"], sp500_df["GICS Sector"]))
-    except Exception as e:
-        return {}, {}, str(e)
-    sig_new = analyze_trend_signals(candidates, with_live=False)
-    long_only = {t: info for t, info in sig_new.items() if info["tag"] == "long"}
-    return long_only, sector_map, None
-
-
 US_LONG_SCAN_CACHE = "us_long_scan_daily.json"
 
 def _load_us_scan_cache():
@@ -2256,39 +2236,13 @@ def _load_us_scan_cache():
     except Exception:
         return None
 
-def _save_us_scan_cache(payload):
-    try:
-        import json
-        with open(US_LONG_SCAN_CACHE, "w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False)
-    except Exception:
-        pass
-
 
 def scan_sp500_long_signs(exclude_set):
-    """장종료(미국 기준 16:00 ET 이후) 후 하루 1회만 실제 스캔. 그 외엔 디스크 캐시 반환."""
-    from datetime import datetime
-    try:
-        import pytz
-        now_et = datetime.now(pytz.timezone("America/New_York"))
-    except Exception:
-        now_et = datetime.now()
-    today_str = now_et.strftime("%Y-%m-%d")
-    post_close = now_et.hour >= 16  # 16:00 ET 이후
+    """디스크 캐시(us_long_scan_daily.json)만 읽어 반환 — 읽기 전용.
+    실제 스캔은 GitHub Actions(long_scan.py)가 장종료 후 수행·commit-back 한다.
+    (Streamlit Cloud 1GB OOM 방지: 앱 프로세스에서 대규모 다운로드를 하지 않음)
+    exclude_set 인자는 호출부 호환을 위해 유지하나 사용하지 않는다."""
     cache = _load_us_scan_cache()
-
-    if cache and cache.get("date") == today_str:
-        long_only = cache.get("long_only", {})
-        sector_map = cache.get("sector_map", {})
-        return long_only, sector_map, None
-
-    if post_close:
-        long_only, sector_map, err = _scan_sp500_long_signs_raw(exclude_set)
-        if err is None:
-            _save_us_scan_cache({"date": today_str, "long_only": long_only, "sector_map": sector_map})
-        return long_only, sector_map, err
-
-    # 장중/프리마켓: 전일 캐시 반환
     if cache:
         return cache.get("long_only", {}), cache.get("sector_map", {}), None
     return {}, {}, None
@@ -2306,103 +2260,12 @@ def _load_kr_scan_cache():
     except Exception:
         return None
 
-def _save_kr_scan_cache(payload):
-    try:
-        import json
-        with open(KR_LONG_SCAN_CACHE, "w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False)
-    except Exception:
-        pass
-
-@st.cache_data(ttl=3600)
-def _scan_kr_long_signs_raw(exclude_set):
-    """실제 스캔 수행 (내부 함수). 호출 시마다 네이버 크롤링 + 신호 분석.
-    장종료 후 1회만 호출되도록 상위 scan_kr_long_signs 에서 게이팅."""
-    from bs4 import BeautifulSoup
-    candidates = []
-    name_map = {}
-    try:
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-        for market in ["0", "1"]:  # 0=KOSPI, 1=KOSDAQ
-            for page in range(1, 5):
-                url = f"https://finance.naver.com/sise/sise_market_sum.naver?sosok={market}&page={page}"
-                resp = req.get(url, headers=headers, timeout=15)
-                resp.encoding = "euc-kr"
-                soup = BeautifulSoup(resp.text, "html.parser")
-                for row in soup.select("table.type_2 tr"):
-                    tds = row.select("td")
-                    if len(tds) < 7:
-                        continue
-                    a = tds[1].select_one("a")
-                    if not a:
-                        continue
-                    name = a.get_text(strip=True)
-                    href = a.get("href", "")
-                    cm = re.search(r"code=(\d{6})(?!\w)", href)
-                    if not cm:
-                        continue
-                    code = cm.group(1)
-                    suffix = ".KQ" if market == "1" else ".KS"
-                    ticker = code + suffix
-                    mcap_text = tds[6].get_text(strip=True).replace(",", "")
-                    try:
-                        mcap_100m = int(mcap_text)  # 억원 단위
-                    except ValueError:
-                        continue
-                    if mcap_100m < 30000:  # 3조원 = 30000억원
-                        continue
-                    # ETF/ETN 제외
-                    if any(kw in name for kw in [
-                        "KODEX", "TIGER", "KBSTAR", "ARIRANG", "SOL", "HANARO",
-                        "ACE", "KOSEF", "TREX", "RISE", "PLUS",
-                        "ETN", "ETF", "인버스", "레버리지", "합성",
-                    ]):
-                        continue
-                    if ticker in exclude_set:
-                        continue
-                    candidates.append(ticker)
-                    name_map[ticker] = name
-    except Exception as e:
-        return {}, {}, str(e)
-    candidates = list(dict.fromkeys(candidates))
-    sig = analyze_trend_signals(candidates, with_live=False)
-    long_only = {t: info for t, info in sig.items() if info["tag"] == "long"}
-    # 시총 정보 주입 (위에서 구한 억원 값 대신 fast_info로 정확한 KRW)
-    for t, info in long_only.items():
-        try:
-            info["mcap"] = yf.Ticker(t).fast_info.get("market_cap") or 0
-        except Exception:
-            info["mcap"] = 0
-    name_out = {t: name_map.get(t, t) for t in long_only}
-    return long_only, name_out, None
-
-
 def scan_kr_long_signs(exclude_set):
-    """장종료 후(16:00 KST 이후) 하루 1회만 실제 스캔. 그 외엔 디스크 캐시 반환.
-    - 오늘 날짜 캐시(post-close 생성) 있으면: 그대로 사용
-    - 없고 현재 KST 16:00 이후: 스캔 실행 후 저장
-    - 16:00 이전: 전일 캐시 있으면 반환, 없으면 빈 결과
-    """
-    from datetime import datetime
-    try:
-        import pytz
-        now_kst = datetime.now(pytz.timezone("Asia/Seoul"))
-    except Exception:
-        now_kst = datetime.now()
-    today_str = now_kst.strftime("%Y-%m-%d")
-    post_close = now_kst.hour >= 16
+    """디스크 캐시(kr_long_scan_daily.json)만 읽어 반환 — 읽기 전용.
+    실제 스캔은 GitHub Actions(long_scan.py)가 장종료 후 수행·commit-back 한다.
+    (Streamlit Cloud 1GB OOM 방지: 앱 프로세스에서 네이버 크롤링·대규모 다운로드를 하지 않음)
+    exclude_set 인자는 호출부 호환을 위해 유지하나 사용하지 않는다."""
     cache = _load_kr_scan_cache()
-
-    if cache and cache.get("date") == today_str:
-        return cache.get("long_only", {}), cache.get("name_map", {}), None
-
-    if post_close:
-        long_only, name_map, err = _scan_kr_long_signs_raw(exclude_set)
-        if err is None:
-            _save_kr_scan_cache({"date": today_str, "long_only": long_only, "name_map": name_map})
-        return long_only, name_map, err
-
-    # 장중: 전일 캐시 반환 (있으면)
     if cache:
         return cache.get("long_only", {}), cache.get("name_map", {}), None
     return {}, {}, None
@@ -2410,13 +2273,11 @@ def scan_kr_long_signs(exclude_set):
 
 exclude_set = set(all_tk)
 
-# 미국 S&P 500 — 미국장 마감(16:00 ET) 후 1회만 스캔
-with st.spinner("미국 신규 Long Sign 조회 중 (장종료 후 1회 스캔)..."):
-    us_longs, sector_map, us_err = scan_sp500_long_signs(exclude_set)
+# 미국 S&P 500 — Actions(long_scan.py)가 장종료 후 스캔·commit-back 한 캐시 읽기
+us_longs, sector_map, us_err = scan_sp500_long_signs(exclude_set)
 
-# 한국 (KOSPI + KOSDAQ, 시총 3조원+) — 장종료(16:00 KST) 후 1회만 스캔
-with st.spinner("한국 신규 Long Sign 조회 중 (장종료 후 1회 스캔)..."):
-    kr_longs, kr_name_map, kr_err = scan_kr_long_signs(exclude_set)
+# 한국 (KOSPI + KOSDAQ, 시총 3조원+) — Actions가 스캔·commit-back 한 캐시 읽기
+kr_longs, kr_name_map, kr_err = scan_kr_long_signs(exclude_set)
 
 # 한글명 임시 병합 (_fmt_row 에서 조회)
 TICKER_NAMES.update(kr_name_map)

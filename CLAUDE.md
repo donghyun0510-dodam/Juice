@@ -65,6 +65,8 @@ python daily_review.py
 | `intraday-global.yml` | Intraday Scan - Global | `*/10 13-21 * * 1-5` | 월~금 22:30~06:00 10분 간격 | `python intraday_scan.py --market global` |
 | `intraday-korea.yml` | Intraday Scan - Korea | `*/10 0-6 * * 1-5` | 월~금 09:00~15:30 10분 간격 | `python intraday_scan.py --market korea` |
 | `scouter-timeseries.yml` | Scouter Timeseries & Performance | `17 20 * * 1-5` | 화~토 05:17 (미국 종가 직후) | `python scouter_logger.py` |
+| `long-scan-global.yml` | Long Scan - Global | `45 21 * * 1-5` | 화~토 06:45 (미국 종가 후) | `python long_scan.py --market global` |
+| `long-scan-korea.yml` | Long Scan - Korea | `15 7 * * 1-5` | 월~금 16:15 (국장 종가 후) | `python long_scan.py --market korea` |
 | `monthly-input-reminder.yml` | Monthly Input Reminder | `0 11 27 * *` | 매월 27일 20:00 (정산 D-2h) | `python monthly_input_reminder.py` |
 | `monthly-stock-returns.yml` | Monthly Stock Returns | `0 13 27 * *` | 매월 27일 22:00 | `python monthly_stock_returns.py` |
 
@@ -72,7 +74,12 @@ python daily_review.py
 - `concurrency.group: sheet-writer` — 시트 쓰기 워크플로우가 동시에 실행되지 않도록 직렬화
 - 공통 셋업: `.github/actions/setup/action.yml` (Python 3.12, pip 캐시, `requirements.txt` 설치, `trendfollow-rules-DH` 프라이빗 레포에서 `signal-judge.md` 주입, SA 자격증명 기록)
 - Secrets: `GOOGLE_OAUTH_TOKEN_B64`, `GOOGLE_SA_JSON`, `GSHEET_FOLDER_ID`, `RULES_DEPLOY_KEY`, `GMAIL_APP_PASSWORD`
-- 상태 파일(`signal_snapshot.json`, `macro_snapshot.json`, `long_sign_seen.json`, `kr_promotion_tracker.json`, `macro_alert_state.json`)은 실행 후 `github-actions[bot]`이 `[skip ci]` 커밋으로 main에 commit-back
+- 상태 파일(`signal_snapshot.json`, `macro_snapshot.json`, `long_sign_seen.json`, `kr_promotion_tracker.json`, `macro_alert_state.json`, `us_long_scan_daily.json`, `kr_long_scan_daily.json`)은 실행 후 `github-actions[bot]`이 `[skip ci]` 커밋으로 main에 commit-back
+
+### Long Sign 풀스캔 분리 (Streamlit Cloud OOM 대응)
+- S&P500·KOSPI/KOSDAQ 전종목 Long sign 스캔은 **메모리 부담이 커서 Streamlit 앱(`market_dashboard.py`)에서 분리**됨. 종전엔 앱 프로세스가 장종료 후 1회 직접 수행 → 500종목 1년치 일괄 다운로드 + 종목별 DataFrame 캐시 누적으로 1GB 컨테이너 OOM·리부팅 유발.
+- 스캔 로직은 `long_scan_core.py`(Streamlit 비의존, 청크 분할 다운로드+`gc`)로 이관, `long_scan.py`가 Actions에서 헤드리스 실행 → `us_long_scan_daily.json`/`kr_long_scan_daily.json` 생성·commit-back.
+- 대시보드의 `scan_sp500_long_signs`/`scan_kr_long_signs`는 이제 **이 JSON 캐시만 읽음**(읽기 전용). 추적 종목 분석(`analyze_trend_signals`)·승격 판정만 앱에서 수행(소규모).
 
 ### 수동 실행
 - GitHub Actions 탭에서 `workflow_dispatch` 수동 트리거 가능

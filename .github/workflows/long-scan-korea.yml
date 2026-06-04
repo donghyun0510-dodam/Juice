@@ -1,0 +1,52 @@
+name: Long Scan - Korea
+
+on:
+  schedule:
+    # UTC 월~금 07:15 = KST 16:15 (국장 종가 15:30 이후).
+    - cron: "15 7 * * 1-5"
+  workflow_dispatch:
+
+concurrency:
+  group: sheet-writer
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    env:
+      TZ: Asia/Seoul
+      GOOGLE_OAUTH_TOKEN_B64: ${{ secrets.GOOGLE_OAUTH_TOKEN_B64 }}
+      GOOGLE_SA_JSON: ${{ secrets.GOOGLE_SA_JSON }}
+      GSHEET_FOLDER_ID: ${{ secrets.GSHEET_FOLDER_ID }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install Python deps
+        run: pip install -r requirements.txt
+
+      - name: Write SA credentials
+        run: printf '%s' "$GOOGLE_SA_JSON" > sa_credentials.json
+
+      - name: Scan KOSPI/KOSDAQ long signs
+        run: python long_scan.py --market korea
+
+      - name: Commit-back scan cache
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add kr_long_scan_daily.json 2>/dev/null || true
+          if git diff --cached --quiet; then echo "no changes"; exit 0; fi
+          git commit -m "chore: kr long scan cache update [skip ci]"
+          for i in 1 2 3 4 5; do
+            git pull --rebase origin main && git push origin main && exit 0
+            echo "push attempt $i failed, retrying…"; sleep 5
+          done
+          exit 1
