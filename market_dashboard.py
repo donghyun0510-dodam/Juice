@@ -1882,7 +1882,7 @@ def _fetch_kr_daily(ticker: str):
         return None
 
 
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=600, max_entries=8)
 def analyze_trend_signals(all_tickers, with_live=True):
     """종목별 추세 신호 분석 (daily bar, 선택적 장중 라이브 가격 합성, 10분 캐시).
     한국(.KS/.KQ)은 FinanceDataReader(Naver), 그 외는 yfinance 사용.
@@ -2211,7 +2211,7 @@ _sign_section("hold_sell", "⛔ 하락 추세 지속", hold_sell,
 # ── 개별주식 2 - 신규 Long Sign 특징주 ──
 # (섹션 타이틀·diff 배너는 scan 및 LAST_DIFF 계산 이후로 이동됨)
 
-@st.cache_data(ttl=86400)
+@st.cache_data(ttl=86400, max_entries=8)
 def get_market_caps(tickers):
     """티커별 시가총액 조회 (USD, 24h 캐시)"""
     caps = {}
@@ -2475,3 +2475,18 @@ st.markdown(
     f'매크로 지표는 후행·동행 지표를 포함하며, 시장은 예측 불가능한 요인에 의해 변동될 수 있습니다.</div>',
     unsafe_allow_html=True,
 )
+
+# ── 메모리 회수 (Streamlit Cloud OOM 방지) ──
+# meta-refresh(600s)로 rerun이 반복되는 동안 Streamlit Cloud는 프로세스를 유지하므로,
+# pandas/yfinance가 할당·해제한 메모리가 glibc 아레나에 잔류해 RSS가 단조 증가(단편화)함.
+# 매 rerun 말미에 GC + malloc_trim(0)으로 free된 메모리를 OS에 반환해 RSS 누적을 차단.
+def _trim_memory():
+    import gc
+    gc.collect()
+    try:
+        import ctypes, ctypes.util
+        libc = ctypes.CDLL(ctypes.util.find_library("c") or "libc.so.6")
+        libc.malloc_trim(0)
+    except Exception:
+        pass  # 비 glibc 환경(Windows 로컬 등)에서는 무시
+_trim_memory()
