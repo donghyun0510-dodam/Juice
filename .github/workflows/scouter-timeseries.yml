@@ -27,6 +27,7 @@ jobs:
       GOOGLE_SA_JSON: ${{ secrets.GOOGLE_SA_JSON }}
       GSHEET_FOLDER_ID: ${{ secrets.GSHEET_FOLDER_ID }}
       GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+      GMAIL_ADDR: ${{ secrets.GMAIL_ADDR }}
     steps:
       - uses: actions/checkout@v6
 

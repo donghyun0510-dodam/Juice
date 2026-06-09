@@ -73,7 +73,7 @@ python daily_review.py
 ### 공통 구성
 - `concurrency.group: sheet-writer` — 시트 쓰기 워크플로우가 동시에 실행되지 않도록 직렬화
 - 공통 셋업: `.github/actions/setup/action.yml` (Python 3.12, pip 캐시, `requirements.txt` 설치, `trendfollow-rules-DH` 프라이빗 레포에서 `signal-judge.md` 주입, SA 자격증명 기록)
-- Secrets: `GOOGLE_OAUTH_TOKEN_B64`, `GOOGLE_SA_JSON`, `GSHEET_FOLDER_ID`, `RULES_DEPLOY_KEY`, `GMAIL_APP_PASSWORD`
+- Secrets: `GOOGLE_OAUTH_TOKEN_B64`, `GOOGLE_SA_JSON`, `GSHEET_FOLDER_ID`, `RULES_DEPLOY_KEY`, `GMAIL_APP_PASSWORD`, `GMAIL_ADDR`(발신/수신 Gmail 주소 — 하드코딩 금지, env/secret 주입)
 - 상태 파일(`signal_snapshot.json`, `macro_snapshot.json`, `long_sign_seen.json`, `kr_promotion_tracker.json`, `macro_alert_state.json`, `us_long_scan_daily.json`, `kr_long_scan_daily.json`)은 실행 후 `github-actions[bot]`이 `[skip ci]` 커밋으로 main에 commit-back
 
 ### Long Sign 풀스캔 분리 (Streamlit Cloud OOM 대응)

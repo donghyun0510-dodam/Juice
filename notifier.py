@@ -9,8 +9,9 @@ from email.message import EmailMessage
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ENV_PATH = os.path.join(BASE_DIR, ".env")
 ALERT_STATE_PATH = os.path.join(BASE_DIR, "macro_alert_state.json")
+MACRO_SNAPSHOT_PATH = os.path.join(BASE_DIR, "macro_snapshot.json")
 
-GMAIL_ADDR = "donghyun0510@gmail.com"
+# 발신/수신 Gmail 주소 — 환경변수 GMAIL_ADDR(또는 .env)로 주입. 하드코딩 금지.
 
 # 정책 파라미터
 DELTA_THRESHOLD = 10.0          # macro_total 변화량 임계
@@ -47,15 +48,19 @@ def send_email(subject: str, body: str) -> bool:
     if not pw:
         print("[notifier] GMAIL_APP_PASSWORD 미설정 — 알림 스킵")
         return False
+    addr = os.environ.get("GMAIL_ADDR", "").strip()
+    if not addr:
+        print("[notifier] GMAIL_ADDR 미설정 — 알림 스킵")
+        return False
     msg = EmailMessage()
-    msg["From"] = GMAIL_ADDR
-    msg["To"] = GMAIL_ADDR
+    msg["From"] = addr
+    msg["To"] = addr
     msg["Subject"] = subject
     msg.set_content(body)
     try:
         ctx = ssl.create_default_context()
         with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=ctx, timeout=15) as s:
-            s.login(GMAIL_ADDR, pw)
+            s.login(addr, pw)
             s.send_message(msg)
         return True
     except Exception as e:
@@ -325,25 +330,49 @@ def log_timeseries_if_due(scores: dict) -> None:
     _log_if_due(scores, TIMESERIES_SHEET_NAME, "last_timeseries_ts")
 
 
+def _yesterday_macro_total() -> float | None:
+    """macro_snapshot.json에 저장된 전일 종가 매크로 종합 점수.
+
+    market_dashboard가 check_and_notify_macro 호출 직전에 갱신하므로
+    scores["macro_total_delta"]가 없을 때의 폴백으로만 사용.
+    """
+    try:
+        with open(MACRO_SNAPSHOT_PATH, "r", encoding="utf-8") as f:
+            snap = json.load(f)
+        return (snap.get("yesterday_final") or {}).get("macro_total")
+    except Exception:
+        return None
+
+
 def check_and_notify_macro(macro_total: float, scores: dict | None = None) -> None:
-    """market_dashboard.py에서 매크로 스냅샷 저장 직후 호출."""
+    """market_dashboard.py에서 매크로 스냅샷 저장 직후 호출.
+
+    알림 조건:
+      1) 등급 전환(히스테리시스) — 악화 시 쿨다운 무시
+      2) 전일 종가 점수 대비 |Δ| >= DELTA_THRESHOLD — 당일 1회만
+    """
     if macro_total is None:
         return
     now = datetime.now()
+    today_str = now.strftime("%Y-%m-%d")
     state = _load_state()
     prev_grade = state.get("last_grade")
-    prev_total = state.get("last_total")
     last_alert_ts = state.get("last_alert_ts")
+    last_delta_date = state.get("last_delta_date")
 
     new_grade = _grade_with_hysteresis(macro_total, prev_grade)
-
     grade_changed = (prev_grade is not None and new_grade != prev_grade)
-    delta_trigger = (
-        prev_total is not None
-        and abs(macro_total - prev_total) >= DELTA_THRESHOLD
-    )
 
-    # 쿨다운: 등급 악화는 무시, 그 외엔 적용
+    # 전일 종가 점수 대비 변화량 (대시보드가 계산해 둔 macro_total_delta 우선)
+    dod_delta = scores.get("macro_total_delta") if scores else None
+    if dod_delta is None:
+        yday = _yesterday_macro_total()
+        dod_delta = (macro_total - yday) if yday is not None else None
+    delta_trigger = (dod_delta is not None and abs(dod_delta) >= DELTA_THRESHOLD)
+    # 같은 날 전일대비 급변 알림을 이미 보냈으면 재알림 방지 (당일 1회)
+    delta_already_today = (last_delta_date == today_str)
+
+    # 쿨다운: 등급 알림에만 적용 (악화는 무시)
     in_cooldown = False
     if last_alert_ts:
         try:
@@ -357,6 +386,7 @@ def check_and_notify_macro(macro_total: float, scores: dict | None = None) -> No
         worsening = GRADE_ORDER.index(new_grade) > GRADE_ORDER.index(prev_grade)
 
     should_notify = False
+    is_delta_alert = False
     subject = ""
     body_lines = []
 
@@ -367,13 +397,14 @@ def check_and_notify_macro(macro_total: float, scores: dict | None = None) -> No
             subject = f"[롱돌이] 매크로 등급 {prev_grade}→{new_grade} {arrow} (점수 {macro_total:.1f})"
             body_lines.append(f"매크로 등급이 {prev_grade}에서 {new_grade}로 전환되었습니다.")
             body_lines.append(f"현재 점수: {macro_total:.2f}")
-    elif delta_trigger and not in_cooldown:
+    elif delta_trigger and not delta_already_today:
         should_notify = True
-        diff = macro_total - prev_total
-        sign = "+" if diff >= 0 else ""
-        subject = f"[롱돌이] 매크로 점수 급변 {prev_total:.1f} → {macro_total:.1f} ({sign}{diff:.1f})"
-        body_lines.append(f"매크로 종합 점수가 {DELTA_THRESHOLD}점 이상 변화했습니다.")
-        body_lines.append(f"이전 기준점: {prev_total:.2f} → 현재: {macro_total:.2f} ({sign}{diff:.2f})")
+        is_delta_alert = True
+        yday_total = macro_total - dod_delta
+        sign = "+" if dod_delta >= 0 else ""
+        subject = f"[롱돌이] 매크로 점수 전일대비 급변 {yday_total:.1f} → {macro_total:.1f} ({sign}{dod_delta:.1f})"
+        body_lines.append(f"매크로 종합 점수가 전일 종가 대비 {DELTA_THRESHOLD}점 이상 변화했습니다.")
+        body_lines.append(f"전일: {yday_total:.2f} → 현재: {macro_total:.2f} ({sign}{dod_delta:.2f})")
         body_lines.append(f"현재 등급: {new_grade}")
 
     if should_notify:
@@ -383,6 +414,8 @@ def check_and_notify_macro(macro_total: float, scores: dict | None = None) -> No
             state["last_alert_ts"] = now.isoformat()
             state["last_total"] = macro_total
             state["last_grade"] = new_grade
+            if is_delta_alert:
+                state["last_delta_date"] = today_str
             _save_state(state)
             return
 

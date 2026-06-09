@@ -14,6 +14,7 @@ jobs:
     env:
       TZ: Asia/Seoul
       GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+      GMAIL_ADDR: ${{ secrets.GMAIL_ADDR }}
     steps:
       - uses: actions/checkout@v6
 
