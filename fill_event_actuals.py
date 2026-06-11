@@ -23,10 +23,7 @@ import requests as req
 from googleapiclient.discovery import build
 
 from sheet_auth import get_credentials
-from weekly_calendar import (
-    COUNTRY_MAP, FINNHUB_URL, KST, WEEKDAY_KR,
-    translate_indicator, _is_relevant_event,
-)
+from weekly_calendar import KST, fetch_investing_calendar
 
 FOLDER_ID = os.environ.get("GSHEET_FOLDER_ID", "1oCzJUMAklZwXqBR67CmvzmFdZGg3wLuv")
 
@@ -81,78 +78,10 @@ def annotate_actual(actual: str, forecast: str, previous: str) -> str:
 
 def fetch_today_events():
     """오늘 KST 기준 핵심 매크로 이벤트 전체 반환.
-    각 이벤트: dict(date, weekday, time, country, name, forecast, previous, actual)
-    actual은 미발표면 ""."""
-    api_key = os.environ.get("FINNHUB_API_KEY")
-    if not api_key:
-        raise RuntimeError("FINNHUB_API_KEY 환경변수 미설정")
-
+    각 이벤트: dict(datetime, date, weekday, time, country, name, forecast, previous, actual)
+    actual은 미발표면 "". 소스는 investing.com(weekly_calendar.fetch_investing_calendar 공유)."""
     today_kst = datetime.now(KST).date()
-    # KST 하루는 UTC -9h~+15h 범위 — Finnhub UTC 기준이므로 양쪽 하루 여유로 조회
-    date_from = (today_kst - timedelta(days=1)).strftime("%Y-%m-%d")
-    date_to = (today_kst + timedelta(days=1)).strftime("%Y-%m-%d")
-
-    resp = req.get(FINNHUB_URL, params={
-        "from": date_from, "to": date_to, "token": api_key,
-    }, timeout=20)
-    resp.raise_for_status()
-    raw = resp.json().get("economicCalendar", []) or []
-
-    events = []
-    seen = set()
-    for item in raw:
-        if not _is_relevant_event(item):
-            continue
-        country = COUNTRY_MAP.get((item.get("country") or "").strip().upper())
-        if not country:
-            continue
-
-        time_str = (item.get("time") or "").strip()
-        if not time_str:
-            continue
-        try:
-            dt = datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
-        except ValueError:
-            try:
-                dt = datetime.fromisoformat(time_str.replace("Z", "+00:00"))
-                if dt.tzinfo is None:
-                    dt = dt.replace(tzinfo=timezone.utc)
-            except ValueError:
-                continue
-        dt = dt.astimezone(KST)
-
-        if dt.date() != today_kst:
-            continue
-
-        unit = (item.get("unit") or "").strip()
-
-        def _fmt(v):
-            if v is None or v == "":
-                return ""
-            return f"{v}{unit}" if unit else str(v)
-
-        raw_name = (item.get("event") or "").strip()
-        name = translate_indicator(raw_name)
-        time_kst = dt.strftime("%H:%M") if dt.hour or dt.minute else "종일"
-
-        key = (dt.strftime("%Y-%m-%d"), time_kst, country, name)
-        if key in seen:
-            continue
-        seen.add(key)
-
-        events.append({
-            "date": dt.strftime("%Y-%m-%d"),
-            "weekday": WEEKDAY_KR[dt.weekday()],
-            "time": time_kst,
-            "country": country,
-            "name": name,
-            "forecast": _fmt(item.get("estimate")),
-            "previous": _fmt(item.get("prev")),
-            "actual": _fmt(item.get("actual")),
-        })
-
-    events.sort(key=lambda e: (e["time"], e["country"], e["name"]))
-    return events
+    return fetch_investing_calendar(today_kst, today_kst)
 
 
 def find_latest_calendar_sheet(gc, drive):

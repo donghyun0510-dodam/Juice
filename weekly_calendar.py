@@ -1,15 +1,16 @@
 """
 주간 경제 캘린더 자동 정리 스크립트.
 
-매주 일요일 실행. Finnhub economic calendar API
-(finnhub.io/api/v1/calendar/economic) 에서 다가오는 주(다음 월~일)
-미국/유럽/중국/일본/한국 high impact 이벤트만 수집하여
+매주 일요일 실행. investing.com 경제 캘린더에서 다가오는 주(다음 월~일)
+미국/유럽/중국/일본/한국 주요 지표(미·유·중·일 3성급, 한국 2성급↑)만 수집하여
 구글 드라이브 `주식리뷰` 폴더에 '주간 경제일정_YYMMDD' 스프레드시트로 저장.
 
 컬럼: 날짜 | 요일 | 시간(KST) | 국가 | 지표명 | 예상 | 이전 | 발표
 발표 컬럼은 생성 시 비워두고 fill_event_actuals.py가 발표 후 채움.
 
-환경변수 FINNHUB_API_KEY 필수.
+데이터 소스: 2026-06 Finnhub economic calendar가 프리미엄 전환(무료키 403)되어
+investing.com getCalendarFilteredData(cloudscraper 우회)로 이관. daily_review.py와 동일 소스.
+fetch_investing_calendar()는 fill_event_actuals.py도 공유한다.
 """
 
 import os
@@ -22,7 +23,8 @@ import time
 from datetime import datetime, timedelta, timezone
 
 import gspread
-import requests as req
+import cloudscraper
+from bs4 import BeautifulSoup
 from googleapiclient.discovery import build
 
 from sheet_auth import get_credentials
@@ -42,7 +44,29 @@ COUNTRY_MAP = {
 
 WEEKDAY_KR = ["월", "화", "수", "목", "금", "토", "일"]
 
-FINNHUB_URL = "https://finnhub.io/api/v1/calendar/economic"
+# investing.com 경제 캘린더 (Finnhub 대체 소스)
+INVESTING_URL = "https://kr.investing.com/economic-calendar/Service/getCalendarFilteredData"
+
+# (country id, 표시국가명, importance 필터) — daily_review.py와 동일 ID. 미·유·중·일 3성급, 한국 2성급↑.
+INVESTING_COUNTRY = [
+    ("5",  "미국", ["3"]),
+    ("72", "유럽", ["3"]),
+    ("37", "중국", ["3"]),
+    ("35", "일본", ["3"]),
+    ("11", "한국", ["2", "3"]),
+]
+
+_CAL_SCRAPER = None
+
+
+def _get_calendar_scraper():
+    """investing.com은 Cloudflare 봇 차단(403)이 걸려 cloudscraper로 우회. 1회 생성 재사용."""
+    global _CAL_SCRAPER
+    if _CAL_SCRAPER is None:
+        _CAL_SCRAPER = cloudscraper.create_scraper(
+            browser={"browser": "chrome", "platform": "windows", "desktop": True}
+        )
+    return _CAL_SCRAPER
 
 # 매크로 분석 시 자주 인용하는 핵심 지표 — Finnhub impact가 high 미만이어도 포함.
 # YoY/Core 변형이 medium으로 분류되는 경우 (예: PPI YoY가 누락되는 사례) 대비.
@@ -252,89 +276,78 @@ def translate_indicator(name: str) -> str:
     return " ".join(parts)
 
 
-def fetch_weekly_events(date_from, date_to):
-    """Finnhub economic calendar API에서 dateFrom~dateTo 범위 조회 후
-    5개국 + impact=high 만 필터링. Time 필드는 UTC naive."""
-    api_key = os.environ.get("FINNHUB_API_KEY")
-    if not api_key:
-        raise RuntimeError("FINNHUB_API_KEY 환경변수 미설정")
+def fetch_investing_calendar(date_from, date_to):
+    """investing.com 경제 캘린더에서 date_from~date_to(date 객체, 양끝 포함) 범위의
+    미국/유럽/중국/일본/한국 주요 지표 수집. 한글 지표명·KST 시간 그대로 반환.
 
-    params = {
-        "from": date_from.strftime("%Y-%m-%d"),
-        "to": date_to.strftime("%Y-%m-%d"),
-        "token": api_key,
-    }
-    print(f"  Finnhub: {date_from.date()} ~ {date_to.date()} 경제 캘린더 조회...")
-
-    resp = None
-    try:
-        resp = req.get(FINNHUB_URL, params=params, timeout=20)
-        resp.raise_for_status()
-        data = resp.json()
-        raw = data.get("economicCalendar", []) or []
-    except Exception as e:
-        body_text = resp.text[:300] if resp is not None else ""
-        print(f"    호출 실패: {e} / 응답: {body_text}")
-        return []
-
-    print(f"    전체 {len(raw)}건")
-
-    range_start = datetime.combine(date_from.date(), datetime.min.time(), tzinfo=KST)
-    range_end = datetime.combine(date_to.date(), datetime.max.time(), tzinfo=KST)
+    Finnhub economic calendar가 2026-06 프리미엄 전환(무료키 403)되어 대체한 소스.
+    각 이벤트: dict(datetime, date, weekday, time, country, name, forecast, previous, actual).
+    actual은 미발표면 "". weekly_calendar(주간 시트 생성)·fill_event_actuals(발표치 채움) 공유.
+    """
+    scraper = _get_calendar_scraper()
+    df = date_from.strftime("%Y-%m-%d")
+    dt2 = date_to.strftime("%Y-%m-%d")
+    print(f"  investing.com: {df} ~ {dt2} 경제 캘린더 조회...")
 
     events = []
     seen = set()
-    for item in raw:
-        if not _is_relevant_event(item):
-            continue
-        country = COUNTRY_MAP.get((item.get("country") or "").strip().upper())
-        if not country:
+    for cid, country, importance in INVESTING_COUNTRY:
+        try:
+            resp = scraper.post(INVESTING_URL, headers={
+                "X-Requested-With": "XMLHttpRequest",
+                "Referer": "https://kr.investing.com/economic-calendar/",
+            }, data={
+                "dateFrom": df, "dateTo": dt2,
+                "country[]": cid, "importance[]": importance,
+                "timeZone": "88",  # (GMT +9:00) Seoul
+            }, timeout=30)
+            if resp.status_code != 200:
+                print(f"    ⚠️ {country} 수집 실패 (HTTP {resp.status_code})")
+                continue
+            html = resp.json().get("data", "") or ""
+        except Exception as e:
+            print(f"    ⚠️ {country} 수집 실패 ({type(e).__name__}: {e})")
             continue
 
-        time_str = (item.get("time") or "").strip()
-        if not time_str:
-            continue
-        try:
-            dt = datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
-        except ValueError:
+        soup = BeautifulSoup(html, "html.parser")
+        for row in soup.find_all("tr", class_="js-event-item"):
+            dt_attr = (row.get("data-event-datetime") or "").strip()
+            if not dt_attr:
+                continue
             try:
-                dt = datetime.fromisoformat(time_str.replace("Z", "+00:00"))
-                if dt.tzinfo is None:
-                    dt = dt.replace(tzinfo=timezone.utc)
+                dt = datetime.strptime(dt_attr, "%Y/%m/%d %H:%M:%S").replace(tzinfo=KST)
             except ValueError:
                 continue
-        dt = dt.astimezone(KST)
 
-        if not (range_start <= dt <= range_end):
-            continue
+            ev_td = row.find("td", class_="event")
+            name = ev_td.get_text(strip=True) if ev_td else ""
+            if not name:
+                continue
 
-        raw_name = (item.get("event") or "").strip()
-        name = translate_indicator(raw_name)
-        unit = (item.get("unit") or "").strip()
+            def _txt(td):
+                return td.get_text(strip=True) if td else ""
 
-        def _fmt(v):
-            if v is None or v == "":
-                return ""
-            return f"{v}{unit}" if unit else str(v)
+            actual = _txt(row.find("td", class_=re.compile("act")))
+            forecast = _txt(row.find("td", class_=re.compile("fore")))
+            previous = _txt(row.find("td", class_=re.compile("prev")))
 
-        forecast = _fmt(item.get("estimate"))
-        previous = _fmt(item.get("prev"))
+            time_kst = dt.strftime("%H:%M") if (dt.hour or dt.minute) else "종일"
+            key = (dt.strftime("%Y-%m-%d"), time_kst, country, name)
+            if key in seen:
+                continue
+            seen.add(key)
 
-        key = (dt.isoformat(), country, name)
-        if key in seen:
-            continue
-        seen.add(key)
-
-        events.append({
-            "datetime": dt,
-            "date": dt.strftime("%Y-%m-%d"),
-            "weekday": WEEKDAY_KR[dt.weekday()],
-            "time": dt.strftime("%H:%M") if dt.hour or dt.minute else "종일",
-            "country": country,
-            "name": name,
-            "forecast": forecast,
-            "previous": previous,
-        })
+            events.append({
+                "datetime": dt,
+                "date": dt.strftime("%Y-%m-%d"),
+                "weekday": WEEKDAY_KR[dt.weekday()],
+                "time": time_kst,
+                "country": country,
+                "name": name,
+                "forecast": forecast,
+                "previous": previous,
+                "actual": actual,
+            })
 
     events.sort(key=lambda e: e["datetime"])
     print(f"    필터 후: {len(events)}건")
@@ -375,7 +388,7 @@ def main():
 
     print(f"대상 기간: {upcoming_monday.strftime('%Y-%m-%d (%a)')} ~ {upcoming_sunday.strftime('%Y-%m-%d (%a)')}")
 
-    events = fetch_weekly_events(upcoming_monday, upcoming_sunday)
+    events = fetch_investing_calendar(upcoming_monday.date(), upcoming_sunday.date())
     rows = build_rows(events)
     if not events:
         print("3성급 이벤트 0건 — placeholder 시트 생성")
