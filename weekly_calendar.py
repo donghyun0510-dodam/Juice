@@ -60,12 +60,19 @@ _CAL_SCRAPER = None
 
 
 def _get_calendar_scraper():
-    """investing.com은 Cloudflare 봇 차단(403)이 걸려 cloudscraper로 우회. 1회 생성 재사용."""
+    """investing.com은 Cloudflare 봇 차단(403)이 걸려 cloudscraper로 우회. 1회 생성 재사용.
+
+    GitHub Actions IP에서 첫 POST가 Cloudflare 챌린지로 403나고(이후 요청은 통과) 첫 국가(미국)만
+    누락되는 사례가 있어, 생성 직후 캘린더 페이지를 GET해 clearance 쿠키를 미리 확보한다."""
     global _CAL_SCRAPER
     if _CAL_SCRAPER is None:
         _CAL_SCRAPER = cloudscraper.create_scraper(
             browser={"browser": "chrome", "platform": "windows", "desktop": True}
         )
+        try:
+            _CAL_SCRAPER.get("https://kr.investing.com/economic-calendar/", timeout=30)
+        except Exception:
+            pass
     return _CAL_SCRAPER
 
 # 매크로 분석 시 자주 인용하는 핵심 지표 — Finnhub impact가 high 미만이어도 포함.
@@ -292,21 +299,29 @@ def fetch_investing_calendar(date_from, date_to):
     events = []
     seen = set()
     for cid, country, importance in INVESTING_COUNTRY:
-        try:
-            resp = scraper.post(INVESTING_URL, headers={
-                "X-Requested-With": "XMLHttpRequest",
-                "Referer": "https://kr.investing.com/economic-calendar/",
-            }, data={
-                "dateFrom": df, "dateTo": dt2,
-                "country[]": cid, "importance[]": importance,
-                "timeZone": "88",  # (GMT +9:00) Seoul
-            }, timeout=30)
-            if resp.status_code != 200:
-                print(f"    ⚠️ {country} 수집 실패 (HTTP {resp.status_code})")
-                continue
-            html = resp.json().get("data", "") or ""
-        except Exception as e:
-            print(f"    ⚠️ {country} 수집 실패 ({type(e).__name__}: {e})")
+        # Cloudflare 챌린지로 첫 요청이 403날 수 있어 1회 재시도(쿠키 확보 후 통과).
+        html = None
+        for attempt in range(2):
+            try:
+                resp = scraper.post(INVESTING_URL, headers={
+                    "X-Requested-With": "XMLHttpRequest",
+                    "Referer": "https://kr.investing.com/economic-calendar/",
+                }, data={
+                    "dateFrom": df, "dateTo": dt2,
+                    "country[]": cid, "importance[]": importance,
+                    "timeZone": "88",  # (GMT +9:00) Seoul
+                }, timeout=30)
+                if resp.status_code == 200:
+                    html = resp.json().get("data", "") or ""
+                    break
+                print(f"    ⚠️ {country} 수집 실패 (HTTP {resp.status_code})"
+                      f"{' — 재시도' if attempt == 0 else ''}")
+            except Exception as e:
+                print(f"    ⚠️ {country} 수집 실패 ({type(e).__name__}: {e})"
+                      f"{' — 재시도' if attempt == 0 else ''}")
+            if attempt == 0:
+                time.sleep(1.5)
+        if html is None:
             continue
 
         soup = BeautifulSoup(html, "html.parser")
