@@ -40,6 +40,12 @@ def _get_calendar_scraper():
         _CAL_SCRAPER = cloudscraper.create_scraper(
             browser={"browser": "chrome", "platform": "windows", "desktop": True}
         )
+        # GitHub Actions IP에서 첫 POST가 Cloudflare 챌린지로 403나는 사례 방지:
+        # 캘린더 페이지를 먼저 GET해 clearance 쿠키를 선확보(첫 국가 누락 방지).
+        try:
+            _CAL_SCRAPER.get("https://kr.investing.com/economic-calendar/", timeout=30)
+        except Exception:
+            pass
     return _CAL_SCRAPER
 
 
