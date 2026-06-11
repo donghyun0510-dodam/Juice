@@ -50,7 +50,7 @@ diff_str = "".join(diff)
 - **사실추가**: 발행본에서 새로 추가된 데이터·인용·맥락
 - **(이미지·표는 무시)**: 네이버 에디터 변환 차이라 학습 대상 아님
 
-### 5. 저장 (3개 파일 모두)
+### 5. 저장 (4개 파일 모두)
 
 #### (a) 개별 lesson
 경로: `C:\Users\dongh\Desktop\주식\AI agent\.claude\skills\blog-learn\lessons\YYYY-MM-DD_제목.md`
@@ -98,6 +98,14 @@ market: KR | US | THEMATIC
 - 6개 분류별로 정수 규칙만 5~10개 유지 (오래된 규칙도 여전히 유효하면 유지, 무효화됐으면 삭제)
 - blog-kr/blog-us 스킬이 작성 시 이 파일을 reference로 읽음 — 명확한 마크다운 헤딩과 짧은 bullet으로 유지
 
+#### (d) 발행 최종본 저장 (필수, 빠뜨리지 말 것)
+경로: `C:\Users\dongh\Desktop\주식\blog\published\`
+파일명: `YYYY-MM-DD_{KR|US|THEMATIC}_published.md` (draft와 동일한 날짜·시장, 접미사만 `_published`)
+
+- **draft에 step 3~4에서 식별한 발행 변경(삭제·정정·추가·재작성)을 적용해 깔끔한 마크다운 최종본**을 만들어 저장. fetch_naver.py 원문은 네이버 에디터 줄바꿈·볼드 소실 노이즈가 있으므로 그대로 쓰지 말고, **draft의 마크다운 구조(표·헤딩·볼드)를 유지한 채 내용만 발행본에 맞춤**.
+- 이미지·표 렌더링 차이는 무시(학습 대상 아님). 텍스트 내용 일치가 목적.
+- 목적: draft ≠ 발행본일 때 완성된 최종본을 통으로 보관 (lesson의 raw diff는 파편이라 최종본 대용 불가).
+
 ### 6. 보고
 사용자에게 한 단락:
 > 이번 lesson에서 새로 추가/강화된 규칙 3개:
@@ -107,6 +115,7 @@ market: KR | US | THEMATIC
 
 ## 중요
 - **5(c) 통합 가이드 갱신을 빠뜨리지 말 것** — 이걸 안 하면 학습이 죽고 그냥 diff 로그가 됨
+- **5(d) 발행 최종본 저장도 빠뜨리지 말 것** — draft는 발행 전 버전이라, 실제 발행본은 published/ 폴더에만 남음
 - blog-kr/blog-us 스킬은 작성 시 `_distilled_style_guide.md`를 자동 읽도록 연결되어 있음
 - diff 결과가 미미하거나 의미있는 패턴이 없으면 그 사실을 lesson 파일에 명시하고 통합 가이드는 갱신 생략
 
