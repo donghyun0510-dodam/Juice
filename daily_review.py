@@ -12,6 +12,7 @@ import gspread
 from googleapiclient.discovery import build
 import yfinance as yf
 import requests as req
+import cloudscraper
 from market_common import classify_signal, SIGNAL_LABEL_KR, save_snapshot
 from scouter_core import get_yield_live
 from bs4 import BeautifulSoup
@@ -28,6 +29,19 @@ drive = build("drive", "v3", credentials=creds)
 
 
 # ── 경제지표 함수 (investing.com 경제 캘린더) ──
+
+# investing.com 경제 캘린더 POST 엔드포인트는 Cloudflare 봇 차단(HTTP 403)이 걸려
+# 일반 requests로는 막힌다. cloudscraper로 우회. 스크레이퍼는 1회 생성해 재사용.
+_CAL_SCRAPER = None
+
+def _get_calendar_scraper():
+    global _CAL_SCRAPER
+    if _CAL_SCRAPER is None:
+        _CAL_SCRAPER = cloudscraper.create_scraper(
+            browser={"browser": "chrome", "platform": "windows", "desktop": True}
+        )
+    return _CAL_SCRAPER
+
 
 def get_direction(actual, prev):
     """현수치와 이전값 비교해서 방향 표시 (▲/▼/=)"""
@@ -60,7 +74,6 @@ def build_economic_indicators(target_date, country="US"):
 
     url = "https://kr.investing.com/economic-calendar/Service/getCalendarFilteredData"
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         "X-Requested-With": "XMLHttpRequest",
         "Referer": "https://kr.investing.com/economic-calendar/",
     }
@@ -69,14 +82,23 @@ def build_economic_indicators(target_date, country="US"):
         "dateTo": date_str,
         "country[]": cfg["code"],
         "importance[]": cfg["importance"],
+        "timeZone": "88",
     }
 
     try:
-        resp = req.post(url, headers=headers, data=payload, timeout=15)
+        scraper = _get_calendar_scraper()
+        resp = scraper.post(url, headers=headers, data=payload, timeout=30)
+        if resp.status_code != 200:
+            print(f"    ⚠️ 경제지표 수집 실패 (HTTP {resp.status_code}) — '발표 없음'과 구분 필요 (재확인 요망)")
+            return []
         data = resp.json()
         html = data.get("data", "")
+        if not html:
+            # data 키 자체가 비어 있으면 차단/장애일 가능성. 진짜 0건은 아래 파싱에서 판정.
+            print(f"    ⚠️ 경제지표 응답 비어 있음 (data 필드 empty) — '발표 없음'과 구분 필요 (재확인 요망)")
+            return []
     except Exception as e:
-        print(f"    investing.com 호출 실패: {e}")
+        print(f"    ⚠️ 경제지표 수집 실패 ({type(e).__name__}: {e}) — '발표 없음'과 구분 필요 (재확인 요망)")
         return []
 
     soup = BeautifulSoup(html, "html.parser")
@@ -1475,6 +1497,40 @@ def get_kr_bond_3y():
     return "", ""
 
 
+def get_kr_index_fdr(fdr_code, target_date):
+    """KR 지수 종가+등락률 — FinanceDataReader(KRX 직접).
+
+    Yahoo 지수 피드(^KS11 등)가 특정 거래일 일봉을 통째로 누락하면
+    yfinance의 iloc[-2]가 이틀 전으로 밀려 '2일치 변화'가 기록되는 버그가 있다
+    (개별 종목·ETF는 정상이라 지수만 틀림). KRX 직접 소스인 FDR은 누락이 없어
+    이를 1차 소스로 사용. 실패 시 ('','') 반환 → 호출부에서 yfinance ETF 폴백.
+    포맷·stale(⚠MM/DD) 마킹은 get_price_and_change_2f와 동일하게 맞춘다.
+    """
+    try:
+        import FinanceDataReader as fdr
+    except Exception as e:
+        print(f"  FDR import 실패 → yfinance 폴백: {e}")
+        return "", ""
+    try:
+        start = (target_date - timedelta(days=15)).strftime("%Y-%m-%d")
+        df = fdr.DataReader(fdr_code, start)
+        col = df["Close"].dropna()
+        if len(col) < 2:
+            return "", ""
+        last_close = float(col.iloc[-1])
+        prev_close = float(col.iloc[-2])
+        pct = (last_close - prev_close) / prev_close * 100
+        price_str = f"{last_close:,.2f}"
+        chg_str = f"{pct:+.2f}%"
+        last_date = col.index[-1].date()
+        if last_date < target_date.date():
+            price_str += f" ⚠{last_date.strftime('%m/%d')}"
+        return price_str, chg_str
+    except Exception as e:
+        print(f"  FDR {fdr_code} 실패 → yfinance 폴백: {e}")
+        return "", ""
+
+
 # ── 국장 시트 데이터 구성 ──
 def build_korea_sheet(target_date):
     print("국장 데이터 수집 중...")
@@ -1731,13 +1787,23 @@ def build_korea_sheet(target_date):
 
         if fallback_ticker:
             etf_hist = fetch(fallback_ticker)
-            if etf_hist is not None and len(etf_hist) >= 2 and etf_hist.index[-1].date() > last_date:
+            if etf_hist is not None and len(etf_hist) >= 2:
+                etf_last_date = etf_hist.index[-1].date()
+                etf_prev_date = etf_hist.index[-2].date()
+                idx_prev_date = idx_hist.index[-2].date()
                 etf_prev = float(etf_hist.iloc[-2])
                 etf_last = float(etf_hist.iloc[-1])
                 etf_pct = (etf_last - etf_prev) / etf_prev
-                prev_close = last_close
-                last_close = last_close * (1 + etf_pct)
-                last_date = etf_hist.index[-1].date()
+                if etf_last_date > last_date:
+                    # 지수 마지막 바가 ETF보다 오래됨(지수 lag) → ETF 일간 변화로 최신 종가 합성
+                    prev_close = last_close
+                    last_close = last_close * (1 + etf_pct)
+                    last_date = etf_last_date
+                elif etf_last_date == last_date and etf_prev_date != idx_prev_date:
+                    # 지수에 직전 거래일 바 누락(갭) → 등락률은 ETF 일간 변화 사용, 종가는 실제 지수 유지
+                    # (예: Yahoo가 ^KS11의 6/9 바를 누락 → 6/8→6/10 이틀치가 일간 변화로 표시되는 오류 방지)
+                    print(f"  ({ticker_symbol} 직전바 누락 {idx_prev_date}≠ETF {etf_prev_date} → 등락률 ETF 일간값 {etf_pct*100:+.2f}% 사용)")
+                    prev_close = last_close / (1 + etf_pct)
 
         pct = (last_close - prev_close) / prev_close * 100
         price_str = f"{last_close:,.2f}"
@@ -1759,10 +1825,18 @@ def build_korea_sheet(target_date):
     for name, ticker, fb in asia_indices:
         asia_data[name] = get_price_and_change_2f(ticker, fb)
 
-    # 한국 지수/매크로 (종가 + 등락률) — Yahoo가 KR 지수 close를 null로 게시하는 사례 대비 ETF 폴백
-    kospi_price,    kospi_chg    = get_price_and_change_2f("^KS11",  "069500.KS")  # KODEX 200
-    kospi200_price, kospi200_chg = get_price_and_change_2f("^KS200", "069500.KS")
-    kosdaq_price,   kosdaq_chg   = get_price_and_change_2f("^KQ11",  "229200.KS")  # KODEX 코스닥150
+    # 한국 지수/매크로 (종가 + 등락률)
+    #   1차: FinanceDataReader(KRX 직접) — Yahoo 지수 피드 일봉 누락(2일치 변화 버그) 회피
+    #   폴백: yfinance(^KS11 등) + ETF(Yahoo가 지수 close를 null로 게시하는 사례 대비)
+    def kr_index(fdr_code, yf_ticker, etf):
+        p, c = get_kr_index_fdr(fdr_code, target_date)
+        if p and c:
+            return p, c
+        return get_price_and_change_2f(yf_ticker, etf)
+
+    kospi_price,    kospi_chg    = kr_index("KS11",  "^KS11",  "069500.KS")  # KODEX 200
+    kospi200_price, kospi200_chg = kr_index("KS200", "^KS200", "069500.KS")
+    kosdaq_price,   kosdaq_chg   = kr_index("KQ11",  "^KQ11",  "229200.KS")  # KODEX 코스닥150
 
     usd_krw_price, usd_krw_chg = get_price_and_change_2f("KRW=X")
 
