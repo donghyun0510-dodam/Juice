@@ -2172,10 +2172,15 @@ def _fmt_row(t, info):
             f'border-radius:3px;margin-left:6px;border:1px solid #d4a843;">🔔 {before}→{after}</span>'
         )
     new_html = NEW_BADGE_HTML if ("NEW_LONG_TICKERS" in globals() and t in NEW_LONG_TICKERS) else ""
+    # 한국 종목(.KS/.KQ)은 원화·정수 표기, 그 외(미국)는 달러·소수 2자리
+    if t.endswith(".KS") or t.endswith(".KQ"):
+        price_html = f'₩{info["last"]:,.0f}'
+    else:
+        price_html = f'${info["last"]:,.2f}'
     return (
         f'<div style="display:flex;justify-content:space-between;padding:4px 8px;border-bottom:1px solid #2a2a2a;">'
         f'<span><strong>{name}</strong> <span style="color:#888;font-size:0.85em;">{t}</span>{sector_html}{change_html}{new_html}</span>'
-        f'<span style="color:{color};">{arrow} {info["chg"]:+.2f}% &nbsp; ${info["last"]:,.2f}</span>'
+        f'<span style="color:{color};">{arrow} {info["chg"]:+.2f}% &nbsp; {price_html}</span>'
         f'</div>'
     )
 
