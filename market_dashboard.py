@@ -277,24 +277,37 @@ def _yf_commodity(ticker_symbol):
 
 
 def get_copper_investing():
-    # yfinance HG=F ($/lb) × 2204.62 → $/톤
+    # yfinance HG=F ($/lb) × 2204.62 → $/톤. yfinance 실패 시 investing.com($/lb) 폴백.
     y = _yf_commodity("HG=F")
     if y[2] is not None:
         ton = y[2] * 2204.62
         return f"{ton:,.0f}", y[1], ton
+    s = _scrape_investing("https://kr.investing.com/commodities/copper?cid=959211")
+    if s[2] is not None:
+        ton = s[2] * 2204.62
+        return f"{ton:,.0f}", s[1], ton
     return "", "", None
 
 
 def get_wti_investing():
-    return _yf_commodity("CL=F")
+    y = _yf_commodity("CL=F")
+    if y[2] is not None:
+        return y
+    return _scrape_investing("https://kr.investing.com/commodities/crude-oil")
 
 
 def get_brent_investing():
-    return _yf_commodity("BZ=F")
+    y = _yf_commodity("BZ=F")
+    if y[2] is not None:
+        return y
+    return _scrape_investing("https://kr.investing.com/commodities/brent-oil")
 
 
 def get_gold_investing():
-    return _yf_commodity("GC=F")
+    y = _yf_commodity("GC=F")
+    if y[2] is not None:
+        return y
+    return _scrape_investing("https://kr.investing.com/commodities/gold")
 
 
 def get_vix_futures_investing():
@@ -634,9 +647,23 @@ def compute_c_risk(wti, brent, gold, copper, silver=None, btc_chg=None,
 
     momentum = min(momentum, 50)
 
+    # 레벨 데이터(유가·금/구리)가 전무하면 0이 아니라 None — 데이터 공백을 '위험 0'으로 오인 방지
+    if oil_avg is None and gc_ratio is None:
+        return None, oil_avg, gc_ratio
+
     # oil(가중2.0) + gc(가중1.0) + momentum(그대로) — 총합 캡 100
     total = oil_score * 2.0 + gc_score * 1.0 + momentum
     return min(total, 100), oil_avg, gc_ratio
+
+
+def _weighted_macro(parts):
+    """(value, weight) 목록의 가중 평균. None 레그는 제외하고 남은 가중치로 재정규화.
+    전부 None이면 None — 데이터 공백을 0점으로 위장하지 않음."""
+    avail = [(v, w) for v, w in parts if v is not None]
+    wsum = sum(w for _, w in avail)
+    if not avail or wsum <= 0:
+        return None
+    return min(sum(v * w for v, w in avail) / wsum, 100)
 
 
 def compute_vix_score(vix_val):
@@ -812,8 +839,10 @@ def _compute_yesterday_baseline():
         vix_score = compute_vix_score(vix)
         # 베이스라인은 모멘텀 재구성 곤란 → S-Risk는 VIX+신용만 근사
         s_risk = compute_s_risk(vix, credit_dev_pct=fetch_credit_dev_pct())
-        macro_total = min(t_risk * 0.30 + fx_risk * 0.25 + c_risk * 0.25 + s_risk * 0.20, 100)
-        macro_total_legacy = min(t_risk * 0.30 + fx_risk * 0.25 + c_risk_legacy * 0.25 + vix_score * 0.20, 100)
+        macro_total = _weighted_macro([
+            (t_risk, 0.30), (fx_risk, 0.25), (c_risk, 0.25), (s_risk, 0.20)])
+        macro_total_legacy = _weighted_macro([
+            (t_risk, 0.30), (fx_risk, 0.25), (c_risk_legacy, 0.25), (vix_score, 0.20)])
         return {
             "t_risk": t_risk, "fx_risk": fx_risk, "c_risk": c_risk,
             "vix_score": vix_score, "s_risk": s_risk, "macro_total": macro_total,
@@ -947,20 +976,14 @@ def collect_all_data():
         data["vix"], credit_dev_pct=_credit_dev, gold_chg=_gold_d, dxy_chg=_dxy_d
     )
 
-    data["macro_total"] = min(
-        data["t_risk"] * 0.30
-        + data["fx_risk"] * 0.25
-        + data["c_risk"] * 0.25
-        + data["s_risk"] * 0.20,
-        100,
-    )
-    data["macro_total_legacy"] = min(
-        data["t_risk"] * 0.30
-        + data["fx_risk"] * 0.25
-        + data["c_risk_legacy"] * 0.25
-        + data["vix_score"] * 0.20,
-        100,
-    )
+    data["macro_total"] = _weighted_macro([
+        (data["t_risk"], 0.30), (data["fx_risk"], 0.25),
+        (data["c_risk"], 0.25), (data["s_risk"], 0.20),
+    ])
+    data["macro_total_legacy"] = _weighted_macro([
+        (data["t_risk"], 0.30), (data["fx_risk"], 0.25),
+        (data["c_risk_legacy"], 0.25), (data["vix_score"], 0.20),
+    ])
 
     # 하위 지수 점수 변화 (어제 마지막 값 대비)
     today_str = datetime.now().strftime("%Y-%m-%d")
@@ -1027,6 +1050,8 @@ def collect_all_data():
 
 def generate_diagnosis(d):
     total = d["macro_total"]
+    if total is None:
+        return ["매크로 데이터 일부 미수신 — 종합 판단 보류 (원자재 등 데이터 소스 확인 필요)"]
     grade = risk_grade(total)
 
     lines = []
@@ -1040,16 +1065,17 @@ def generate_diagnosis(d):
     }
     lines.append(grade_text.get(grade, ""))
 
-    # 가장 높은/낮은 위험 요인
-    factors = {
+    # 가장 높은/낮은 위험 요인 (데이터 미수신 레그는 제외)
+    factors = {k: v for k, v in {
         "금리": d["t_risk"],
         "환율": d["fx_risk"],
         "원자재": d["c_risk"],
         "위험심리": d.get("s_risk", d["vix_score"]),
-    }
-    top = max(factors, key=factors.get)
-    bottom = min(factors, key=factors.get)
-    lines.append(f"최고 위험 영역: **{top}** ({factors[top]:.0f}점) / 상대적 안정: **{bottom}** ({factors[bottom]:.0f}점)")
+    }.items() if v is not None}
+    if factors:
+        top = max(factors, key=factors.get)
+        bottom = min(factors, key=factors.get)
+        lines.append(f"최고 위험 영역: **{top}** ({factors[top]:.0f}점) / 상대적 안정: **{bottom}** ({factors[bottom]:.0f}점)")
 
     # 금리 세부
     if d["spread"] is not None:
@@ -1460,26 +1486,41 @@ with st.spinner("매크로 데이터 수집 중..."):
     d = collect_all_data()
 
 total = d["macro_total"]
-grade = risk_grade(total)
-gc = grade_css_color(grade)
 
 # ── 종합 위험도 게이지 ──
 c1, c2, c3 = st.columns([1, 2, 1])
 with c2:
-    st.markdown(
-        f"""
-        <div class="gauge-container" style="border-color:{gc}40;">
-            <div style="position:absolute;top:0;left:0;right:0;height:3px;background:{gc};"></div>
-            <p class="gauge-label">매크로 위험 지표</p>
-            <p class="gauge-score" style="color:{gc};">{total:.0f}<span class="unit"> / 100</span></p>
-            <p class="gauge-grade" style="color:{gc};">{grade}</p>
-            <div class="gauge-bar">
-                <div class="gauge-bar-fill" style="width:{min(total,100):.0f}%;background:linear-gradient(to right,{COLOR_SAFE} 0%,{COLOR_CAUTION} 25%,{COLOR_DANGER} 50%,{COLOR_CRISIS} 75%,{COLOR_CRISIS} 100%);background-size:{(100/min(total,100)*100) if total>0 else 100:.1f}% 100%;background-position:0 0;"></div>
+    if total is None:
+        # 매크로 레그 일부 미수신 → 종합 점수 산출 불가. 0점으로 위장하지 않음.
+        st.markdown(
+            """
+            <div class="gauge-container" style="border-color:#88888840;">
+                <div style="position:absolute;top:0;left:0;right:0;height:3px;background:#888;"></div>
+                <p class="gauge-label">매크로 위험 지표</p>
+                <p class="gauge-score" style="color:#888;">—<span class="unit"> / 100</span></p>
+                <p class="gauge-grade" style="color:#888;">데이터 일부 미수신</p>
+                <div class="gauge-bar"><div class="gauge-bar-fill" style="width:0%;background:#888;"></div></div>
             </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+            """,
+            unsafe_allow_html=True,
+        )
+    else:
+        grade = risk_grade(total)
+        gc = grade_css_color(grade)
+        st.markdown(
+            f"""
+            <div class="gauge-container" style="border-color:{gc}40;">
+                <div style="position:absolute;top:0;left:0;right:0;height:3px;background:{gc};"></div>
+                <p class="gauge-label">매크로 위험 지표</p>
+                <p class="gauge-score" style="color:{gc};">{total:.0f}<span class="unit"> / 100</span></p>
+                <p class="gauge-grade" style="color:{gc};">{grade}</p>
+                <div class="gauge-bar">
+                    <div class="gauge-bar-fill" style="width:{min(total,100):.0f}%;background:linear-gradient(to right,{COLOR_SAFE} 0%,{COLOR_CAUTION} 25%,{COLOR_DANGER} 50%,{COLOR_CRISIS} 75%,{COLOR_CRISIS} 100%);background-size:{(100/min(total,100)*100) if total>0 else 100:.1f}% 100%;background-position:0 0;"></div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
 st.markdown("")
 
@@ -1517,13 +1558,28 @@ def _risk_gradient(th):
 
 cols = st.columns(4)
 for col, (code, label, score, max_score, th, delta) in zip(cols, sub_indices):
-    g = risk_grade(score, th)
-    sc = grade_css_color(g)
-    pct = min(score / max_score * 100, 100)
-    # 그라데이션을 max 구간(0~100)으로 펼친 뒤 fill 너비(pct)에 비례해 잘라 보이게 함
-    bar_bg_size = f"{(100/pct*100):.1f}% 100%" if pct > 0 else "100% 100%"
-    bar_grad = _risk_gradient(th)
     with col:
+        if score is None:
+            # 데이터 미수신 — 0점으로 위장하지 않고 명시
+            st.markdown(
+                f"""
+                <div class="sub-card">
+                    <div style="position:absolute;top:0;left:0;right:0;height:2px;background:#888;"></div>
+                    <p class="sc-label">{code}</p>
+                    <p class="sc-score" style="color:#888;">—</p>
+                    <p class="sc-grade" style="color:#888;">{label} · 데이터 없음</p>
+                    <div class="sc-bar"><div class="sc-bar-fill" style="width:0%;background:#888;"></div></div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            continue
+        g = risk_grade(score, th)
+        sc = grade_css_color(g)
+        pct = min(score / max_score * 100, 100)
+        # 그라데이션을 max 구간(0~100)으로 펼친 뒤 fill 너비(pct)에 비례해 잘라 보이게 함
+        bar_bg_size = f"{(100/pct*100):.1f}% 100%" if pct > 0 else "100% 100%"
+        bar_grad = _risk_gradient(th)
         st.markdown(
             f"""
             <div class="sub-card">
@@ -1585,8 +1641,12 @@ with st.expander(f"환율 — FX-Risk {d['fx_risk']:.0f}점 · {fx_g}"):
     st.markdown(detail_table(rows), unsafe_allow_html=True)
 
 # ── 원자재 세부 ──
-c_g = risk_grade(d["c_risk"], (30, 60, 85))
-with st.expander(f"원자재 — C-Risk {d['c_risk']:.0f}점 · {c_g}"):
+if d["c_risk"] is None:
+    _c_label = "원자재 — C-Risk 데이터 없음 (yfinance·investing.com 모두 미수신)"
+else:
+    c_g = risk_grade(d["c_risk"], (30, 60, 85))
+    _c_label = f"원자재 — C-Risk {d['c_risk']:.0f}점 · {c_g}"
+with st.expander(_c_label):
     rows = []
     _com_src = "yfinance (15분 지연)"
     for label, key, val, fmt, chg in [

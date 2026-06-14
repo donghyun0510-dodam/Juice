@@ -230,23 +230,37 @@ def _yf_commodity(ticker_symbol):
 
 
 def get_copper_investing():
+    # yfinance HG=F ($/lb) × 2204.62 → $/톤. yfinance 실패 시 investing.com($/lb) 폴백.
     y = _yf_commodity("HG=F")
     if y[2] is not None:
         ton = y[2] * 2204.62
         return f"{ton:,.0f}", y[1], ton
+    s = _scrape_investing("https://kr.investing.com/commodities/copper?cid=959211")
+    if s[2] is not None:
+        ton = s[2] * 2204.62
+        return f"{ton:,.0f}", s[1], ton
     return "", "", None
 
 
 def get_wti_investing():
-    return _yf_commodity("CL=F")
+    y = _yf_commodity("CL=F")
+    if y[2] is not None:
+        return y
+    return _scrape_investing("https://kr.investing.com/commodities/crude-oil")
 
 
 def get_brent_investing():
-    return _yf_commodity("BZ=F")
+    y = _yf_commodity("BZ=F")
+    if y[2] is not None:
+        return y
+    return _scrape_investing("https://kr.investing.com/commodities/brent-oil")
 
 
 def get_gold_investing():
-    return _yf_commodity("GC=F")
+    y = _yf_commodity("GC=F")
+    if y[2] is not None:
+        return y
+    return _scrape_investing("https://kr.investing.com/commodities/gold")
 
 
 def get_vix_futures_investing():
@@ -600,8 +614,22 @@ def compute_c_risk(wti, brent, gold, copper, silver=None, btc_chg=None,
 
     momentum = min(momentum, 50)
 
+    # 레벨 데이터(유가·금/구리)가 전무하면 0이 아니라 None — 데이터 공백을 '위험 0'으로 오인 방지
+    if oil_avg is None and gc_ratio is None:
+        return None, oil_avg, gc_ratio
+
     total = oil_score * 2.0 + gc_score * 1.0 + momentum
     return min(total, 100), oil_avg, gc_ratio
+
+
+def _weighted_macro(parts):
+    """(value, weight) 목록의 가중 평균. None 레그는 제외하고 남은 가중치로 재정규화.
+    전부 None이면 None — 데이터 공백을 0점으로 위장하지 않음."""
+    avail = [(v, w) for v, w in parts if v is not None]
+    wsum = sum(w for _, w in avail)
+    if not avail or wsum <= 0:
+        return None
+    return min(sum(v * w for v, w in avail) / wsum, 100)
 
 
 def compute_vix_score(vix_val):
@@ -680,8 +708,10 @@ def _compute_yesterday_baseline():
         vix_score = compute_vix_score(vix)
         # 베이스라인(전일 종가)은 모멘텀 재구성 곤란 → S-Risk는 VIX+신용만 근사
         s_risk = compute_s_risk(vix, credit_dev_pct=fetch_credit_dev_pct())
-        macro_total = min(t_risk * 0.30 + fx_risk * 0.25 + c_risk * 0.25 + s_risk * 0.20, 100)
-        macro_total_legacy = min(t_risk * 0.30 + fx_risk * 0.25 + c_risk_legacy * 0.25 + vix_score * 0.20, 100)
+        macro_total = _weighted_macro([
+            (t_risk, 0.30), (fx_risk, 0.25), (c_risk, 0.25), (s_risk, 0.20)])
+        macro_total_legacy = _weighted_macro([
+            (t_risk, 0.30), (fx_risk, 0.25), (c_risk_legacy, 0.25), (vix_score, 0.20)])
         return {
             "t_risk": t_risk, "fx_risk": fx_risk, "c_risk": c_risk,
             "vix_score": vix_score, "s_risk": s_risk, "macro_total": macro_total,
@@ -772,12 +802,10 @@ def collect_macro_scores() -> dict:
     )
     vix_score = compute_vix_score(vix)
     s_risk = compute_s_risk(vix, credit_dev_pct=credit_dev, gold_chg=gold_daily, dxy_chg=dxy_daily)
-    macro_total = min(
-        t_risk * 0.30 + fx_risk * 0.25 + c_risk * 0.25 + s_risk * 0.20, 100
-    )
-    macro_total_legacy = min(
-        t_risk * 0.30 + fx_risk * 0.25 + c_risk_legacy * 0.25 + vix_score * 0.20, 100
-    )
+    macro_total = _weighted_macro([
+        (t_risk, 0.30), (fx_risk, 0.25), (c_risk, 0.25), (s_risk, 0.20)])
+    macro_total_legacy = _weighted_macro([
+        (t_risk, 0.30), (fx_risk, 0.25), (c_risk_legacy, 0.25), (vix_score, 0.20)])
 
     return {
         "t_risk": t_risk,
