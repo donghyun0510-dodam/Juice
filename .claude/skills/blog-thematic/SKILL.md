@@ -12,7 +12,7 @@ description: "도담아빠 블로그 테마형 deep-dive 글 작성 — 특정 I
 
 ## 자동 저장 (필수)
 초안 출력과 **동시에** 다음 경로에 저장:
-- 경로: `C:\Users\dongh\Desktop\주식\blog\draft\`
+- 경로: `C:\Users\dongh\Desktop\Google Drive 동기화\blog\draft\`
 - 파일명: `YYYY-MM-DD_THEMATIC_<주제>.md` (주제는 kebab-case, 예: `space-etf-comparison`, `spacex-ipo`)
 
 ## 6섹션 구조 (가변)

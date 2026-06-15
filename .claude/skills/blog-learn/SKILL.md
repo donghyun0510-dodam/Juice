@@ -22,7 +22,7 @@ stdout에 "# 제목\n\n본문" 형식으로 출력. 임시 파일에 저장 후 
 
 ### 2. draft 매칭
 - 인자로 draft 경로 받았으면 그거 사용
-- 아니면 `C:\Users\dongh\Desktop\주식\blog\draft\` 안에서 **가장 최근 .md 파일** 선택
+- 아니면 `C:\Users\dongh\Desktop\Google Drive 동기화\blog\draft\` 안에서 **가장 최근 .md 파일** 선택
   - 발행본 본문 첫 줄(제목)에 `KR` 또는 `US`, 날짜가 들어있으면 우선 매칭
 - 매칭 실패 시 사용자에게 draft 경로 물어보고 중단
 
@@ -59,7 +59,7 @@ diff_str = "".join(diff)
 ---
 date: YYYY-MM-DD
 naver_url: https://blog.naver.com/...
-draft_path: C:\Users\dongh\Desktop\주식\blog\draft\...
+draft_path: C:\Users\dongh\Desktop\Google Drive 동기화\blog\draft\...
 market: KR | US | THEMATIC
 ---
 
@@ -99,7 +99,7 @@ market: KR | US | THEMATIC
 - blog-kr/blog-us 스킬이 작성 시 이 파일을 reference로 읽음 — 명확한 마크다운 헤딩과 짧은 bullet으로 유지
 
 #### (d) 발행 최종본 저장 (필수, 빠뜨리지 말 것)
-경로: `C:\Users\dongh\Desktop\주식\blog\published\`
+경로: `C:\Users\dongh\Desktop\Google Drive 동기화\blog\published\`
 파일명: `YYYY-MM-DD_{KR|US|THEMATIC}_published.md` (draft와 동일한 날짜·시장, 접미사만 `_published`)
 
 - **draft에 step 3~4에서 식별한 발행 변경(삭제·정정·추가·재작성)을 적용해 깔끔한 마크다운 최종본**을 만들어 저장. fetch_naver.py 원문은 네이버 에디터 줄바꿈·볼드 소실 노이즈가 있으므로 그대로 쓰지 말고, **draft의 마크다운 구조(표·헤딩·볼드)를 유지한 채 내용만 발행본에 맞춤**.

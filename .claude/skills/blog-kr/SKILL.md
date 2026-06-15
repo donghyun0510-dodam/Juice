@@ -26,7 +26,7 @@ python fetch_today_review.py --market kr
 
 ## 자동 저장 (필수, 마지막 단계)
 초안 출력과 **동시에** 다음 경로에 저장:
-- 경로: `C:\Users\dongh\Desktop\주식\blog\draft\`
+- 경로: `C:\Users\dongh\Desktop\Google Drive 동기화\blog\draft\`
 - 파일명: `YYYY-MM-DD_KR_draft.md`
 
 ## KR 5섹션 구조
