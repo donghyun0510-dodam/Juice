@@ -609,14 +609,15 @@ def compute_c_risk(wti, brent, gold, copper, silver=None, btc_chg=None,
         else:
             oil_score = min(40, 5 + (oil_avg - 85) / 20 * 25)
 
-    # 2) G/C Ratio 수준: 선형 (regime 지표, 비중 축소)
-    # Gold($/oz) ÷ Copper($/톤): 정상 0.35~0.55, 높을수록 경기 둔화 신호
+    # 2) G/C Ratio 수준 (regime 지표). Gold($/oz) ÷ Copper($/톤): 높을수록 경기 둔화 신호.
+    # 2026-06 재보정: 금 $4,000대 레짐에서 G/C 2년 실범위 0.23~0.41(median 0.31)뿐이라
+    # 구식 0.35~0.55 밴드는 상단 미도달로 사실상 미발화 → 0.32→0, 0.44→20, 캡 0.47(현 레짐 적합).
+    # 비율 지표라 저(低)G/C=경기 양호=정상적 0 (유가처럼 저레벨 배경 floor를 두지 않음).
     gc_score = 0
     gc_ratio = None
     if gold is not None and copper is not None and copper > 0:
         gc_ratio = gold / copper
-        # 0.35→0, 0.55→20 선형, 극단값 캡
-        gc_score = max(0, min(25, (gc_ratio - 0.35) / 0.20 * 20))
+        gc_score = max(0, min(25, (gc_ratio - 0.32) / 0.12 * 20))
 
     # 3) 단기 모멘텀 — 방향성 반영. 경기 해석 변수(유가·구리)는 signed.
     momentum = 0
