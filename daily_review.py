@@ -386,9 +386,9 @@ def assess_copper_risk(current_price=None):
 def compute_c_risk_index(wti_val, brent_val, gold_val, copper_val,
                          oil_chg=None, gold_chg=None, silver_chg=None,
                          copper_chg=None, btc_chg=None, legacy=False):
-    """원자재 종합 위험 지수 (선형 + 단기 모멘텀)
-    유가 수준(선형 0@85→30@105, 가중 2.0) + G/C 비율(선형 0@0.35→20@0.55, 가중 1.0)
-    + 단기 모멘텀(유가·구리·은 일변동, 최대 50)
+    """원자재 종합 위험 지수 (2단 램프 + 단기 모멘텀)
+    유가 수준(2단 램프: 70~85 배경 0→5, 85~105 재점화 5→30, 캡40, 가중 2.0)
+    + G/C 비율(선형 0@0.35→20@0.55, 가중 1.0) + 단기 모멘텀(유가·구리·은 일변동, 최대 50)
     신규(legacy=False): 금 모멘텀·BTC는 위험심리(S-Risk)로 이관돼 제외.
     legacy=True: 구공식(금 모멘텀 + BTC 포함) — 타임시리즈 레거시 컬럼 전용.
     """
@@ -397,14 +397,21 @@ def compute_c_risk_index(wti_val, brent_val, gold_val, copper_val,
     ORANGE = {"red": 1, "green": 0.5, "blue": 0}
     RED = {"red": 1, "green": 0, "blue": 0}
 
+    # 유가 수준: 2단 램프 — ≤70 무위험, 70~85 절대 고평가 배경(0→5),
+    # 85~105 인플레 재점화(5→30), >105 캡40. $80대 고유가가 0으로 깔리지 않게.
     oil_score = 0
     oil_avg = None
     if wti_val is not None and brent_val is not None:
         oil_avg = (wti_val + brent_val) / 2
-        oil_score = max(0, min(40, (oil_avg - 85) / 20 * 30))
     elif wti_val is not None:
         oil_avg = wti_val
-        oil_score = max(0, min(40, (oil_avg - 85) / 20 * 30))
+    if oil_avg is not None:
+        if oil_avg <= 70:
+            oil_score = 0
+        elif oil_avg <= 85:
+            oil_score = (oil_avg - 70) / 15 * 5
+        else:
+            oil_score = min(40, 5 + (oil_avg - 85) / 20 * 25)
 
     gc_score = 0
     gc_ratio = None

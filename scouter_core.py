@@ -564,14 +564,21 @@ def compute_c_risk(wti, brent, gold, copper, silver=None, btc_chg=None,
       금 모멘텀·BTC는 위험심리(S-Risk)로 이관돼 여기서 제외.
     legacy=True: 구공식(금 모멘텀 + BTC 포함). 타임시리즈 레거시 컬럼 연속성 전용.
     """
+    # 유가 수준: 2단 램프 — ≤70 무위험, 70~85 절대 고평가 배경(0→5),
+    # 85~105 인플레 재점화(5→30), >105 캡40. $80대 고유가가 0으로 깔리지 않게.
     oil_score = 0
     oil_avg = None
     if wti is not None and brent is not None:
         oil_avg = (wti + brent) / 2
-        oil_score = max(0, min(40, (oil_avg - 85) / 20 * 30))
     elif wti is not None:
         oil_avg = wti
-        oil_score = max(0, min(40, (oil_avg - 85) / 20 * 30))
+    if oil_avg is not None:
+        if oil_avg <= 70:
+            oil_score = 0
+        elif oil_avg <= 85:
+            oil_score = (oil_avg - 70) / 15 * 5
+        else:
+            oil_score = min(40, 5 + (oil_avg - 85) / 20 * 25)
 
     gc_score = 0
     gc_ratio = None

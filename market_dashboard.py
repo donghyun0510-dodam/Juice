@@ -593,15 +593,21 @@ def compute_c_risk(wti, brent, gold, copper, silver=None, btc_chg=None,
                    legacy=False):
     """원자재 종합 위험 지수. 신규(legacy=False): 유가·G/C 레벨 + 유가/구리/은 모멘텀.
     금 모멘텀·BTC는 S-Risk로 이관돼 제외. legacy=True: 구공식(금 모멘텀+BTC 포함)."""
-    # 1) 유가 수준: 85→0, 105→30 선형, 이후 외삽 (캡 40)
+    # 1) 유가 수준: 2단 램프 — ≤70 무위험, 70~85 절대 고평가 배경(0→5),
+    #    85~105 인플레 재점화(5→30), >105 캡40. $80대 고유가가 0으로 깔리지 않게.
     oil_score = 0
     oil_avg = None
     if wti is not None and brent is not None:
         oil_avg = (wti + brent) / 2
-        oil_score = max(0, min(40, (oil_avg - 85) / 20 * 30))
     elif wti is not None:
         oil_avg = wti
-        oil_score = max(0, min(40, (oil_avg - 85) / 20 * 30))
+    if oil_avg is not None:
+        if oil_avg <= 70:
+            oil_score = 0
+        elif oil_avg <= 85:
+            oil_score = (oil_avg - 70) / 15 * 5
+        else:
+            oil_score = min(40, 5 + (oil_avg - 85) / 20 * 25)
 
     # 2) G/C Ratio 수준: 선형 (regime 지표, 비중 축소)
     # Gold($/oz) ÷ Copper($/톤): 정상 0.35~0.55, 높을수록 경기 둔화 신호
