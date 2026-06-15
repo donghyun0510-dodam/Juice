@@ -62,6 +62,7 @@ def credit_dev_asof(hyg, ief, kst_d, window=20):
 
 
 def main():
+    dry_run = "--dry-run" in sys.argv
     creds = get_credentials()
     gc = gspread.authorize(creds)
     drive = build('drive', 'v3', credentials=creds)
@@ -71,7 +72,8 @@ def main():
         print("시트 없음:", SHEET_NAME); return 1
     ws = gc.open_by_key(fs[0]['id']).sheet1
     vals = ws.get_all_values()
-    print(f"행 수(헤더 포함): {len(vals)}")
+    print(f"{'[DRY-RUN] ' if dry_run else ''}행 수(헤더 포함): {len(vals)}")
+    print(f"헤더: {vals[0] if vals else '(빈 시트)'}")
 
     print("yfinance 다운로드 중...")
     S = load_series()
@@ -118,10 +120,17 @@ def main():
         except Exception:
             macro_v2 = ""
 
-        out_rows.append([round(c_new, 1), round(s_risk, 1),
+        out_rows.append([round(c_new, 1) if c_new is not None else "", round(s_risk, 1),
                          round(macro_v2, 1) if macro_v2 != "" else ""])
-        print(f"{ts}: C v2={round(c_new,1)} S={round(s_risk,1)} 매크로v2={out_rows[-1][2]} "
-              f"(구 C={r[3]} VIX={r[4]} 매크로={r[5]})")
+        old_v2 = r[10] if len(r) > 10 else ""   # K열 = 기존 C-RISK_v2
+        c_disp = round(c_new, 1) if c_new is not None else None
+        print(f"{ts}: C v2 {old_v2}→{c_disp}  S={round(s_risk,1)} 매크로v2={out_rows[-1][2]}")
+
+    if dry_run:
+        n_chg = sum(1 for r, o in zip(vals[1:], out_rows)
+                    if str(o[0]) != (r[10] if len(r) > 10 else ""))
+        print(f"\n[DRY-RUN] 미기록. C-RISK_v2 변경 예정 행: {n_chg}/{len(out_rows)}")
+        return 0
 
     # 헤더 + 데이터 기록 (K:M = 11~13열)
     ws.update(range_name="K1", values=[["C-RISK_v2", "S-RISK", "매크로종합_v2"]])
