@@ -702,8 +702,9 @@ def fetch_credit_dev_pct(window=20):
 def compute_s_risk(vix_val, credit_dev_pct=None, gold_chg=None, dxy_chg=None):
     """위험심리 종합 지수(S-Risk): VIX 베이스 + 신용·금·달러 가산, 100 캡.
       base=VIX_score(0~100), credit=HYG/IEF 추세이탈(0~25, dev−2.5%서 만점),
-      gold=금 급등(0~20, +1%초과*8), dollar=DXY 급등(0~15, +0.3%초과*18).
-    금·달러는 '급변(모멘텀)'만 — 레벨은 C-Risk·FX-Risk가 소유(이중계상 방지)."""
+      gold=금 급등(0~15, +1.7%초과, +4.5%만점), dollar=DXY 급등(0~15, +0.3%초과*18).
+    금·달러는 '급변(모멘텀)'만 — 레벨은 C-Risk·FX-Risk가 소유(이중계상 방지).
+    금 모멘텀 2026-06-16 재캘리브레이션(floor 1.0→1.7%≈1σ, cap 20→15) — 상세는 scouter_core.compute_s_risk."""
     base = compute_vix_score(vix_val)
     credit = 0.0
     if credit_dev_pct is not None:
@@ -711,7 +712,7 @@ def compute_s_risk(vix_val, credit_dev_pct=None, gold_chg=None, dxy_chg=None):
     gold = 0.0
     g = chg_num(gold_chg)
     if g is not None:
-        gold = max(0.0, min(20.0, (g - 1.0) * 8))
+        gold = max(0.0, min(15.0, (g - 1.7) / 2.8 * 15))
     dollar = 0.0
     d = chg_num(dxy_chg)
     if d is not None:

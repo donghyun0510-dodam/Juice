@@ -673,9 +673,11 @@ def compute_s_risk(vix_val, credit_dev_pct=None, gold_chg=None, dxy_chg=None):
     """위험심리 종합 지수(S-Risk): VIX 베이스 + 신용·금·달러 가산, 100 캡.
       base   = VIX_score (0~100)
       credit = HYG/IEF 20일 SMA 대비 하락 이탈 (0~25, dev −2.5%서 만점)
-      gold   = 금 일변동 상승분 (0~20, +1% 초과 *8, +3.5%서 만점) — 안전자산 쏠림
+      gold   = 금 일변동 상승분 (0~15, +1.7%(≈1σ) 초과, +4.5%서 만점) — 안전자산 쏠림
       dollar = DXY 일변동 상승분 (0~15, +0.3% 초과 *18, +1.13%서 만점) — 달러 도피
-    금·달러는 '레벨'이 아닌 '급변(모멘텀)'만 반영 — 레벨은 각각 C-Risk·FX-Risk가 소유(이중계상 방지)."""
+    금·달러는 '레벨'이 아닌 '급변(모멘텀)'만 반영 — 레벨은 각각 C-Risk·FX-Risk가 소유(이중계상 방지).
+    금 모멘텀: 2026-06-16 재캘리브레이션 — 구공식(floor 1.0%/cap 20/기울기 8)은 금 σ≈1.7% 레짐에서
+    4일 중 1일 점등(False Positive 多)·VIX 베이스와 동급 → floor를 1σ로 올리고 cap을 15로 낮춰 꼬리사건화."""
     base = compute_vix_score(vix_val)
 
     credit = 0.0
@@ -685,7 +687,7 @@ def compute_s_risk(vix_val, credit_dev_pct=None, gold_chg=None, dxy_chg=None):
     gold = 0.0
     g = chg_num(gold_chg)
     if g is not None:
-        gold = max(0.0, min(20.0, (g - 1.0) * 8))
+        gold = max(0.0, min(15.0, (g - 1.7) / 2.8 * 15))
 
     dollar = 0.0
     d = chg_num(dxy_chg)
