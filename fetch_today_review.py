@@ -50,9 +50,11 @@ def _pad(row, n=10):
 
 def parse_kr(values):
     """국장 탭 rows → 섹션별 dict."""
-    out = {"news": [], "indicators": [], "asia": [], "macro": [], "sectors": []}
+    out = {"news": [], "indicators": [], "asia": [], "macro": [], "flows": [], "sectors": []}
     section = None
     last_sector = ""
+    macro_sub = "other"   # macro 섹션 내 하위 블록: "flows"(수급) vs "other"
+    cur_market = ""        # 수급 블록의 현재 시장(KOSPI/KOSDAQ)
     for raw in values:
         row = _pad(raw, 10)
         a, b, c, d, e, f, g = row[0], row[1], row[2], row[3], row[4], row[5], row[6]
@@ -84,7 +86,16 @@ def parse_kr(values):
             if any([b, c, d, e]):
                 out["asia"].append({"country": b, "name": c, "price": d, "chg": e})
         elif section == "macro":
-            if any([b, c, d, e, f]):
+            if b == "수급":
+                macro_sub = "flows"
+            elif b:
+                macro_sub = "other"
+            if macro_sub == "flows":
+                if c:
+                    cur_market = c
+                if d:  # 주체(외국인/기관/개인) 있는 행만
+                    out["flows"].append({"market": cur_market, "actor": d, "value": e})
+            elif any([b, c, d, e, f]):
                 out["macro"].append({"category": b, "name": c, "price": d, "chg": e, "risk": f})
         elif section == "sectors":
             if b and not c and not d:
@@ -187,6 +198,12 @@ def render_kr(p, date_str):
         if x.get("risk"):
             line += f"\t[{x['risk']}]"
         L.append(f"- {line}")
+    if p.get("flows"):
+        markets = {}
+        for fl in p["flows"]:
+            markets.setdefault(fl["market"], []).append(f"{fl['actor']} {fl['value']}")
+        for mk, items in markets.items():
+            L.append(f"- 수급 {mk}: " + " / ".join(items))
     L.append("")
 
     L.append("## 5. 섹터/종목 (신호 포함)")

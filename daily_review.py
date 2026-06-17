@@ -1924,6 +1924,13 @@ def build_korea_sheet(target_date):
     rows.append(["4.지수 및 Macro", "지수", "KOSPI", kospi_price, kospi_chg, "", "", "", "", ""])
     rows.append(["", "", "KOSPI200", kospi200_price, kospi200_chg, "", "", "", "", ""])
     rows.append(["", "", "KOSDAQ", kosdaq_price, kosdaq_chg, "", "", "", "", ""])
+    # 수급 — 수동 입력 영역(값 E열은 사용자가 직접 기입). 외국인/기관/개인 순매수.
+    rows.append(["", "수급", "KOSPI", "외국인", "", "", "", "", "", ""])
+    rows.append(["", "", "", "기관", "", "", "", "", "", ""])
+    rows.append(["", "", "", "개인", "", "", "", "", "", ""])
+    rows.append(["", "", "KOSDAQ", "외국인", "", "", "", "", "", ""])
+    rows.append(["", "", "", "기관", "", "", "", "", "", ""])
+    rows.append(["", "", "", "개인", "", "", "", "", "", ""])
     rows.append(["", "환율", "원/달러", usd_krw_price, usd_krw_chg, "", "", "", "", ""])
     rows.append(["", "", "환율 종합 경보", "", "", krw_risk_label if krw_risk_label else "", "", "", "", ""])
     if krw_risk_color:
