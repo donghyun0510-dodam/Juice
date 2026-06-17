@@ -89,5 +89,6 @@ python daily_review.py
 - GitHub Actions는 **레포 활동이 60일간 없으면 스케줄 cron을 자동 비활성화**함 → 정기적으로 확인 필요
 - 구버전 Windows Task Scheduler(`StockReview_Global`/`StockReview_Korea`)와 로컬 `run_*.bat`은 **더 이상 사용하지 않음** (2026-05-28 `_archive/` 폴더로 이동, 히스토리 용도로 보관)
 - OAuth2 전환으로 사용하지 않게 된 `credentials.json`도 같은 시점 `_archive/`로 이동
-- `.claude/skills/` — 도담아빠 블로그 작성 3개 스킬. 호출: `/blog-kr`, `/blog-us`, `/blog-thematic`. 경제지표 해석·평균 회귀·AI Capex 프레임은 `/blog-kr`·`/blog-us`에 모두 통합됨.
+- `.claude/skills/` — 도담아빠 블로그 작성 3개 스킬. 호출: `/blog-kr`, `/blog-us`, `/blog-thematic`. 경제지표 해석·평균 회귀·AI Capex 프레임은 `/blog-kr`·`/blog-us`에 모두 통합됨. 발행본 학습은 `/blog-learn <네이버URL>`.
+- `.claude/skills/blog-shorts/` — 일일 증시 리뷰를 유튜브 숏츠용 음성 브리핑 대본(고정 6단락)으로 압축 + edge-tts 한국어 MP3(남 InJoon/여 SunHi) 생성. 호출: `/blog-shorts [YYYY-MM-DD] [KR|US]`. 영어·약어는 한글 음가(빅스/롱 사인/스페이스엑스 등), ~320자≈60초. 재생성기 `blog/shorts/make_shorts.py`(레포 밖).
 - `.claude/skills/finance-sheet/` — 구글 시트 `금융 자산 관리`(자산·부채·순자산 월별 추적) 조회·입력·관리 스킬. 호출: `/finance-sheet`. 월말 마감·입출금 기록·적금 만기/납입 처리 규약 포함(증시 리뷰 시트와 별개).
