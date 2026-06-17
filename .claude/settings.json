@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/git-autosync.sh",
+            "shell": "bash",
+            "timeout": 30,
+            "statusMessage": "origin/main 동기화 확인 중..."
+          }
+        ]
+      }
+    ]
+  }
+}
