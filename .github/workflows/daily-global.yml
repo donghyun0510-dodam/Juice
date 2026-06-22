@@ -25,7 +25,7 @@ jobs:
       - uses: ./.github/actions/setup
 
       - name: Run daily review (global)
-        run: python daily_review.py --global-only
+        run: python daily_review.py --global-only --skip-if-done
 
       - name: Commit-back state files
         run: |
