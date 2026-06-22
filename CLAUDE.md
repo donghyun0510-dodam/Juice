@@ -35,6 +35,7 @@ python daily_review.py
 - 아시아 지수(`naver_index('.N225'/'.TWII'/'.HSI'/'.SSEC')`), 국내 지수(`naver_index('KOSPI'/'KPI200'/'KOSDAQ')` — 국내는 `m.stock.naver.com/api/index/{code}/basic`), 달러/원(`naver_quote('USDKRW')`=FX_USDKRW), WTI(글로벌과 동일 `naver_quote('WTI')`)를 **네이버 1차 + 기존(FDR/yfinance+ETF) 폴백**으로 전환. KR 국고채 3년물은 기존부터 네이버(`finance.naver.com/marketindex/interestDailyQuote IRR_GOVT03Y`).
 - **KR 개별종목 stale 보정**: yfinance가 KRX 당일 일봉을 늦게 게시해 `⚠MM/DD`로 stale 마킹되는 종목(에스엠·JYP·CJ ENM·알테오젠 등)은, 그 종목만 `naver_kr_stock(6자리코드)`(`m.stock.naver.com/api/stock/{code}/basic`)로 등락률을 덮고 ⚠ 제거. 52주/MA·매매신호는 yfinance 2y 히스토리 기준 유지(등락률 표시만 보정).
 - **수급(외국인/기관/개인) 제외**: 네이버는 KOSPI+KOSDAQ 합산만 제공 → 사용자 수동 입력 유지.
+- **시트 날짜 정렬도 네이버 1차**: `--korea-only` 시 시트명 날짜를 `naver_index_date('KOSPI')`(KOSPI localTradedAt) 기준으로 맞추고 yfinance(069500.KS/^KS11) 폴백. 데이터 소스(네이버)와 날짜 소스를 일치시켜, yfinance 일봉 게시 지연 때 '시트=어제·데이터=오늘'로 어긋나는 사고 방지.
 
 ## 구글 시트 구조
 ### 글로벌 시트 (미국)

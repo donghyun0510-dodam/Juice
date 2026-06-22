@@ -17,6 +17,7 @@
 import re
 import time
 import threading
+from datetime import datetime
 
 import requests
 from bs4 import BeautifulSoup
@@ -258,3 +259,21 @@ def naver_kr_stock(code):
     오긁힘을 보정하는 용도. 실패 시 (None,'',None).
     """
     return _from_item(_get_json(f"{_M_API}/stock/{code}/basic"))
+
+
+def naver_index_date(code):
+    """지수의 최신 거래일을 datetime(자정)으로 반환. 실패 시 None.
+
+    국장 시트 날짜 정렬용 — KOSPI의 localTradedAt(KST) 기준. yfinance 일봉 게시
+    지연으로 시트 날짜와 (네이버) 데이터 날짜가 어긋나는 문제 방지.
+    """
+    url = f"{_API}/index/{code}/basic" if code.startswith(".") else f"{_M_API}/index/{code}/basic"
+    payload = _get_json(url)
+    if isinstance(payload, dict):
+        ts = payload.get("localTradedAt")
+        if ts:
+            try:
+                return datetime.strptime(ts[:10], "%Y-%m-%d")
+            except (ValueError, TypeError):
+                pass
+    return None

@@ -17,7 +17,7 @@ from market_common import classify_signal, SIGNAL_LABEL_KR, save_snapshot
 from scouter_core import get_yield_live
 from naver_macro import (
     naver_quote, naver_quote_for_ticker, naver_quote_fmt_for_ticker,
-    naver_index, naver_kr_stock,
+    naver_index, naver_kr_stock, naver_index_date,
 )
 from bs4 import BeautifulSoup
 import re
@@ -2151,19 +2151,23 @@ def main():
         # 데이터와 시트 날짜가 어긋나는 문제 방지 — 4/29 시트에 4/27 종가가
         # 들어가는 사고 재발 방지)
         if korea_only:
-            # 069500.KS(KODEX200) 우선, ^KS11 폴백 — Yahoo가 KR 지수 일봉 close를
-            # null로 게시하는 케이스(5/11 사례)에 ETF가 더 신뢰 가능
-            latest_kr_date = None
-            for ticker in ("069500.KS", "^KS11"):
-                try:
-                    hist = yf.download(ticker, period="10d", progress=False)["Close"].dropna()
-                    if len(hist) > 0:
-                        latest_kr_date = hist.index[-1].to_pydatetime()
-                        break
-                except Exception as e:
-                    print(f"  ({ticker} 최신 거래일 조회 실패: {e})")
+            # 네이버 KOSPI tradedAt 1차 — 데이터 소스(네이버)와 시트 날짜를 일치시킴.
+            # (yfinance 일봉 게시 지연 시 시트=어제·데이터=오늘로 어긋나는 문제 방지)
+            # 폴백: yfinance 069500.KS(KODEX200) → ^KS11
+            latest_kr_date = naver_index_date("KOSPI")
+            src = "네이버 KOSPI" if latest_kr_date else None
+            if latest_kr_date is None:
+                for ticker in ("069500.KS", "^KS11"):
+                    try:
+                        hist = yf.download(ticker, period="10d", progress=False)["Close"].dropna()
+                        if len(hist) > 0:
+                            latest_kr_date = hist.index[-1].to_pydatetime()
+                            src = f"yfinance {ticker}"
+                            break
+                    except Exception as e:
+                        print(f"  ({ticker} 최신 거래일 조회 실패: {e})")
             if latest_kr_date and latest_kr_date.date() != today.date():
-                print(f"  → 시트 날짜 정렬: {today.strftime('%Y-%m-%d')} → {latest_kr_date.strftime('%Y-%m-%d')} (yfinance 최신 KRX 바 기준)")
+                print(f"  → 시트 날짜 정렬: {today.strftime('%Y-%m-%d')} → {latest_kr_date.strftime('%Y-%m-%d')} ({src} 최신 거래일 기준)")
                 today = latest_kr_date
         date_str = today.strftime("%y%m%d")
     sheet_name = f"증시 리뷰_{date_str}"
