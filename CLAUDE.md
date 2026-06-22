@@ -21,7 +21,20 @@ python daily_review.py
 | 소스 | 수집 항목 |
 |------|----------|
 | **investing.com** 경제 캘린더 API | 전날 발표된 미국 3성급 경제지표 (현수치/예상/이전) |
-| **yfinance** (Yahoo Finance) | 금리, 환율, 원자재, VIX, 금, BTC, 지수 등락률, 미국/한국 개별종목 등락률 |
+| **네이버 금융**(`naver_macro.py`) | **매크로·위험심리·국장 1차 소스**: 미국채 2Y/10Y/30Y, 환율 DXY/EUR/JPY/CNY/원, 원자재 WTI/브렌트/금/구리/은, VIX, 아시아 지수(니케이/가권/항셍/상해), 국내 지수(KOSPI/KOSPI200/KOSDAQ), KR 국고채 3년, KR 개별종목(yfinance stale 보정용) |
+| **yfinance** (Yahoo Finance) | 비트코인(BTC-USD), 미국 지수 등락률, 미국/한국 개별종목(2y 히스토리·신호), 신용스프레드(HYG/IEF), **위 네이버 항목의 폴백** |
+
+### 매크로/위험심리 네이버 전환 (`naver_macro.py`)
+- 금리·환율·원자재·VIX·금은 **네이버 모바일 API(api.stock.naver.com) 1차 + yfinance/CNBC/investing 폴백**으로 일원화(`naver_quote`/`naver_quote_for_ticker`). 비공식 API라 항상 폴백을 단다.
+- **비트코인은 제외** — 네이버는 업비트/빗썸 원화(KRW)만 있고 USD가 없어 `BTC-USD`(yfinance) 유지. `TICKER_KEY`에 BTC 매핑 없음.
+- 엔드포인트: 채권 `marketindex/bond/US{2,10,30}YT=RR`, FX는 `marketindex/exchange`(DXY=`.DXY`/EURUSD) + 데스크톱 `worldDailyQuote`(USD/JPY·USD/CNY), 원자재 `marketindex/{energy,metals}/...`, VIX `index/.VIX/basic`.
+- **PREOPEN 가드**: NYMEX/COMEX 선물은 정비 휴장(17:00~18:00 ET, daily-global 실행 시각과 겹침) 동안 종가는 유지되나 등락률이 0으로 리셋 → `marketStatus=PREOPEN` 감지 시 `/prices` 일별 바(전일 종가)로 대체.
+- 적용 파일(중복 정의 동기): `daily_review.py`(증시리뷰), `scouter_core.py`(스카우터 코어 — `scouter_logger`·대시보드 공유), `market_dashboard.py`. `get_yield_live`/`get_price_and_change`/`_yf_daily_pct`/`_yf_commodity_2f`에 주입.
+
+### 국장 시트 네이버 전환 (`build_korea_sheet`)
+- 아시아 지수(`naver_index('.N225'/'.TWII'/'.HSI'/'.SSEC')`), 국내 지수(`naver_index('KOSPI'/'KPI200'/'KOSDAQ')` — 국내는 `m.stock.naver.com/api/index/{code}/basic`), 달러/원(`naver_quote('USDKRW')`=FX_USDKRW), WTI(글로벌과 동일 `naver_quote('WTI')`)를 **네이버 1차 + 기존(FDR/yfinance+ETF) 폴백**으로 전환. KR 국고채 3년물은 기존부터 네이버(`finance.naver.com/marketindex/interestDailyQuote IRR_GOVT03Y`).
+- **KR 개별종목 stale 보정**: yfinance가 KRX 당일 일봉을 늦게 게시해 `⚠MM/DD`로 stale 마킹되는 종목(에스엠·JYP·CJ ENM·알테오젠 등)은, 그 종목만 `naver_kr_stock(6자리코드)`(`m.stock.naver.com/api/stock/{code}/basic`)로 등락률을 덮고 ⚠ 제거. 52주/MA·매매신호는 yfinance 2y 히스토리 기준 유지(등락률 표시만 보정).
+- **수급(외국인/기관/개인) 제외**: 네이버는 KOSPI+KOSDAQ 합산만 제공 → 사용자 수동 입력 유지.
 
 ## 구글 시트 구조
 ### 글로벌 시트 (미국)
@@ -91,4 +104,6 @@ python daily_review.py
 - OAuth2 전환으로 사용하지 않게 된 `credentials.json`도 같은 시점 `_archive/`로 이동
 - `.claude/skills/` — 도담아빠 블로그 작성 3개 스킬. 호출: `/blog-kr`, `/blog-us`, `/blog-thematic`. 경제지표 해석·평균 회귀·AI Capex 프레임은 `/blog-kr`·`/blog-us`에 모두 통합됨. 발행본 학습은 `/blog-learn <네이버URL>`.
 - `.claude/skills/blog-shorts/` — 일일 증시 리뷰를 유튜브 숏츠용 음성 브리핑 대본(고정 6단락)으로 압축 + edge-tts 한국어 MP3(남 InJoon/여 SunHi) 생성. 호출: `/blog-shorts [YYYY-MM-DD] [KR|US]`. 영어·약어는 한글 음가(빅스/롱 사인/스페이스엑스 등), ~320자≈60초. 재생성기 `blog/shorts/make_shorts.py`(레포 밖).
+- `.claude/skills/blog-community/` — 일일 리뷰 발행본/초안(.md)을 표 못 쓰는 커뮤니티(네이버 카페 등)용 **평문**으로 변환(표→인라인/문단, 헤딩·볼드 마커 제거). 호출: `/blog-community [YYYY-MM-DD] [KR|US]`. 변환기 `convert_community.py`가 원본 파일을 그대로 읽어 변환(종목 리스트 재입력 X). 결과는 `blog/community/YYYY-MM-DD_{KR|US}_community.md` 저장.
+- `.claude/skills/market-news/` — 당일 증시 뉴스를 찾아 **날짜 교차검증**(원기사 발행일 확인)까지 하고 정책·개별기업 등으로 분류해 시트 1.시장 뉴스 포맷으로 출력·기록. 호출: `/market-news [YYYY-MM-DD] [KR|US]`. KR은 WebSearch가 약해 한경 등 매체 페이지 직접 fetch, 비현실 수치·과거 기사 플래그. 국장 뉴스는 지수·수급 빼고 시장영향 이슈 중심. 승인 후 `증시 리뷰_YYMMDD` 시트에 기록.
 - `.claude/skills/finance-sheet/` — 구글 시트 `금융 자산 관리`(자산·부채·순자산 월별 추적) 조회·입력·관리 스킬. 호출: `/finance-sheet`. 월말 마감·입출금 기록·적금 만기/납입 처리 규약 포함(증시 리뷰 시트와 별개).

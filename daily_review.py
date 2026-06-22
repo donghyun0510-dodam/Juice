@@ -15,6 +15,10 @@ import requests as req
 import cloudscraper
 from market_common import classify_signal, SIGNAL_LABEL_KR, save_snapshot
 from scouter_core import get_yield_live
+from naver_macro import (
+    naver_quote, naver_quote_for_ticker, naver_quote_fmt_for_ticker,
+    naver_index, naver_kr_stock,
+)
 from bs4 import BeautifulSoup
 import re
 from datetime import datetime, timedelta
@@ -183,6 +187,10 @@ def get_price(ticker_symbol):
 
 def get_price_and_change(ticker_symbol):
     """종가와 등락률 둘 다 반환"""
+    # 네이버 1차 (매크로/위험심리 매핑 티커만; BTC·지수는 매핑 없어 폴백)
+    ps, cs, val = naver_quote_fmt_for_ticker(ticker_symbol)
+    if val is not None:
+        return ps, cs
     try:
         tk = yf.Ticker(ticker_symbol)
         hist = tk.history(period="5d")
@@ -206,6 +214,10 @@ def _yf_daily_pct(ticker):
     """최근 2개 일봉 종가 간 %변동. compute_c_risk_index 모멘텀 입력 전용 — 실시간
     티커의 슬라이딩 1-day %change와 달리 세션 휴지기에도 값이 고정(주말 Fri settle 유지).
     단 BTC 등 24/7 종목은 UTC 00:00에 캔들이 롤오버되므로 완전 고정은 아님."""
+    # 네이버 1차: fluctuationsRatio(전일 종가 대비 일변동률). PREOPEN은 일별 바로 대체.
+    _v, _c, ratio = naver_quote_for_ticker(ticker)
+    if ratio is not None:
+        return ratio
     try:
         h = yf.Ticker(ticker).history(period="5d")["Close"].dropna()
         if len(h) >= 2:
@@ -284,7 +296,11 @@ def _scrape_investing(url):
 
 
 def _yf_commodity_2f(ticker, multiplier=1.0, fmt="{:,.2f}"):
-    """yfinance 일봉 종가로 원자재 가격·등락률 반환."""
+    """원자재 가격·등락률 반환. 네이버 1차(원자재는 PREOPEN 시 일별 바), yfinance 폴백."""
+    nval, nchg, _ = naver_quote_for_ticker(ticker)
+    if nval is not None:
+        v = nval * multiplier
+        return fmt.format(v), nchg, v
     try:
         tk = yf.Ticker(ticker)
         h = tk.history(period="10d")["Close"].dropna()
@@ -1775,6 +1791,19 @@ def build_korea_sheet(target_date):
         kr_changes = {info[2]: "" for info in kr_stocks_info}
         kr_signs = {info[2]: "" for info in kr_stocks_info}
 
+    # yfinance가 KRX 당일 일봉을 늦게 게시하는 종목(에스엠·JYP·CJ ENM·알테오젠 등) 보정:
+    # stale 마킹된 종목만 네이버 현재 종가 등락률로 덮고 ⚠ 제거(등락률 표시만 — 신호는 yfinance 기준 유지).
+    for ticker in list(kr_stale.keys()):
+        try:
+            code = ticker.split(".")[0]
+            nv, nc, nratio = naver_kr_stock(code)
+            if nratio is not None:
+                kr_changes[ticker] = nc
+                kr_stale.pop(ticker, None)
+                print(f"  네이버 보정: {ticker} {nc} (yfinance stale 대체)")
+        except Exception:
+            pass
+
     # 한국 스냅샷 저장
     try:
         save_snapshot(kr_signal_tags, market="korea")
@@ -1837,30 +1866,49 @@ def build_korea_sheet(target_date):
         ("항셍",       "^HSI",      None),       # HK ETF도 같이 lag → stale 마킹만
         ("상해종합",   "000001.SS", None),       # CN ETF도 같이 lag → stale 마킹만
     ]
+    # 네이버 해외지수 1차(.N225/.TWII/.HSI/.SSEC), 실패 시 yfinance+ETF 폴백
+    ASIA_NAVER = {"니케이225": ".N225", "대만 가권": ".TWII", "항셍": ".HSI", "상해종합": ".SSEC"}
     asia_data = {}
     for name, ticker, fb in asia_indices:
-        asia_data[name] = get_price_and_change_2f(ticker, fb)
+        nv, nc, _ = naver_index(ASIA_NAVER.get(name, ""))
+        if nv is not None:
+            asia_data[name] = (f"{nv:,.2f}", nc)
+        else:
+            asia_data[name] = get_price_and_change_2f(ticker, fb)
 
     # 한국 지수/매크로 (종가 + 등락률)
     #   1차: FinanceDataReader(KRX 직접) — Yahoo 지수 피드 일봉 누락(2일치 변화 버그) 회피
     #   폴백: yfinance(^KS11 등) + ETF(Yahoo가 지수 close를 null로 게시하는 사례 대비)
-    def kr_index(fdr_code, yf_ticker, etf):
+    #   네이버 1차(KOSPI/KPI200/KOSDAQ) → FDR → yfinance+ETF
+    def kr_index(fdr_code, yf_ticker, etf, naver_code):
+        nv, nc, _ = naver_index(naver_code)
+        if nv is not None:
+            return f"{nv:,.2f}", nc
         p, c = get_kr_index_fdr(fdr_code, target_date)
         if p and c:
             return p, c
         return get_price_and_change_2f(yf_ticker, etf)
 
-    kospi_price,    kospi_chg    = kr_index("KS11",  "^KS11",  "069500.KS")  # KODEX 200
-    kospi200_price, kospi200_chg = kr_index("KS200", "^KS200", "069500.KS")
-    kosdaq_price,   kosdaq_chg   = kr_index("KQ11",  "^KQ11",  "229200.KS")  # KODEX 코스닥150
+    kospi_price,    kospi_chg    = kr_index("KS11",  "^KS11",  "069500.KS", "KOSPI")   # KODEX 200
+    kospi200_price, kospi200_chg = kr_index("KS200", "^KS200", "069500.KS", "KPI200")
+    kosdaq_price,   kosdaq_chg   = kr_index("KQ11",  "^KQ11",  "229200.KS", "KOSDAQ")  # KODEX 코스닥150
 
-    usd_krw_price, usd_krw_chg = get_price_and_change_2f("KRW=X")
+    # 달러/원 — 네이버 1차, yfinance 폴백
+    _ukv, _ukc, _ = naver_quote("USDKRW")
+    if _ukv is not None:
+        usd_krw_price, usd_krw_chg = f"{_ukv:,.2f}", _ukc
+    else:
+        usd_krw_price, usd_krw_chg = get_price_and_change_2f("KRW=X")
 
-    # 국채 3년물 (investing.com 스크래핑)
+    # 국채 3년물 (네이버 finance.naver.com 1차, investing.com 폴백)
     kr_bond_3y, kr_bond_3y_chg = get_kr_bond_3y()
 
-    # WTI 유가
-    wti_price, wti_chg = get_price_and_change_2f("CL=F")
+    # WTI 유가 — 네이버 1차(글로벌과 동일 소스), yfinance 폴백
+    _wv, _wc, _ = naver_quote("WTI")
+    if _wv is not None:
+        wti_price, wti_chg = f"{_wv:,.2f}", _wc
+    else:
+        wti_price, wti_chg = get_price_and_change_2f("CL=F")
     wti_val = parse_price(wti_price)
 
     # 위험 진단

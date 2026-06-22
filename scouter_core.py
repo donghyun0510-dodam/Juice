@@ -13,6 +13,11 @@ import yfinance as yf
 import requests as req
 import pandas as pd
 
+# 네이버 매크로/위험심리 1차 소스 (실패 시 아래 yfinance/CNBC/investing 폴백)
+from naver_macro import (
+    naver_quote, naver_quote_for_ticker, naver_quote_fmt_for_ticker,
+)
+
 # ──────────────────────────────────────────────
 # curl_cffi 세션 (Yahoo rate limit 우회)
 # ──────────────────────────────────────────────
@@ -130,6 +135,10 @@ def _live_and_prev(tk):
 
 
 def get_price_and_change(ticker_symbol):
+    # 네이버 1차 (매크로/위험심리 매핑 티커만; BTC·지수·종목은 매핑 없어 폴백)
+    ps, cs, val = naver_quote_fmt_for_ticker(ticker_symbol)
+    if val is not None:
+        return ps, cs, val
     try:
         tk = yf.Ticker(ticker_symbol)
         last_close, prev_close = _live_and_prev(tk)
@@ -175,6 +184,10 @@ def _yf_daily_pct(ticker):
     """최근 2개 일봉 종가 간 %변동. compute_c_risk 모멘텀 입력 전용 — 실시간 티커의
     슬라이딩 1-day %change와 달리 세션 휴지기에도 값이 고정(주말 Fri settle 유지).
     단 BTC 등 24/7 종목은 UTC 00:00에 캔들이 롤오버되므로 완전 고정은 아님."""
+    # 네이버 1차: fluctuationsRatio(전일 종가 대비 일변동률). PREOPEN은 일별 바로 대체.
+    _v, _c, ratio = naver_quote_for_ticker(ticker)
+    if ratio is not None:
+        return ratio
     try:
         h = yf.Ticker(ticker).history(period="5d")["Close"].dropna()
         if len(h) >= 2:
@@ -384,6 +397,10 @@ def _fetch_treasury_yield(maturity):
 
 
 def get_yield_live(maturity, yf_ticker):
+    # 네이버 모바일 미국채(2Y/10Y/30Y) 1차 — 2Y의 취약한 CNBC→재무부 체인 대체
+    nval, nchg, _ = naver_quote(maturity)
+    if nval is not None:
+        return f"{nval:.3f}", nchg, nval
     r = _fetch_cnbc_yield(CNBC_YIELD_SYM.get(maturity, ""))
     if r[2] is not None:
         return r
