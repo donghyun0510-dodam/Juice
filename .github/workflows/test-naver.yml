@@ -1,0 +1,28 @@
+name: Test Naver Connectivity
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      TZ: Asia/Seoul
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install requests beautifulsoup4
+      - name: Probe naver_macro on runner
+        run: |
+          python - <<'PY'
+          import naver_macro as nm
+          print("== naver_quote ==")
+          for k in ["2Y","10Y","30Y","DXY","EURUSD","USDJPY","USDCNY","USDKRW","WTI","BRENT","GOLD","COPPER","VIX"]:
+              print(f"  {k:8s}", nm.naver_quote(k))
+          print("== naver_index ==")
+          for c in [".N225",".TWII",".HSI",".SSEC","KOSPI","KPI200","KOSDAQ"]:
+              print(f"  {c:8s}", nm.naver_index(c))
+          print("== naver_kr_stock(041510) ==", nm.naver_kr_stock("041510"))
+          print("== naver_index_date(KOSPI) ==", nm.naver_index_date("KOSPI"))
+          PY
