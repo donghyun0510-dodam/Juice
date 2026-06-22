@@ -1791,16 +1791,20 @@ def build_korea_sheet(target_date):
         kr_changes = {info[2]: "" for info in kr_stocks_info}
         kr_signs = {info[2]: "" for info in kr_stocks_info}
 
-    # yfinance가 KRX 당일 일봉을 늦게 게시하는 종목(에스엠·JYP·CJ ENM·알테오젠 등) 보정:
-    # stale 마킹된 종목만 네이버 현재 종가 등락률로 덮고 ⚠ 제거(등락률 표시만 — 신호는 yfinance 기준 유지).
-    for ticker in list(kr_stale.keys()):
+    # yfinance가 KRX 당일 일봉을 늦게/안 게시하는 종목(에스엠·JYP·CJ ENM·알테오젠 등) 보정:
+    # ① stale 마킹(전일종가) ② 값 자체가 빈 종목 둘 다 네이버 현재 등락률로 채우고 ⚠ 제거.
+    # (등락률 표시만 — 52주/MA·매매신호는 yfinance 2y 히스토리 기준이라 데이터 없으면 비움)
+    for _info in kr_stocks_info:
+        ticker = _info[2]
+        if ticker not in kr_stale and kr_changes.get(ticker):
+            continue  # 정상 값 있음 → 건너뜀
         try:
             code = ticker.split(".")[0]
             nv, nc, nratio = naver_kr_stock(code)
             if nratio is not None:
                 kr_changes[ticker] = nc
                 kr_stale.pop(ticker, None)
-                print(f"  네이버 보정: {ticker} {nc} (yfinance stale 대체)")
+                print(f"  네이버 보정: {ticker} {nc}")
         except Exception:
             pass
 
