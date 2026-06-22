@@ -1,6 +1,6 @@
 {
   "global": {
-    "timestamp": "2026-06-23T06:28:05",
+    "timestamp": "2026-06-23T08:04:29",
     "signals": {
       "^SOX": "long",
       "INTC": "long",
