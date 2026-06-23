@@ -1,10 +1,19 @@
 """롱돌이 이메일 알림 모듈 — Gmail SMTP로 본인에게 발송."""
 import os
+import sys
 import json
 import smtplib
 import ssl
 from datetime import datetime, timedelta
 from email.message import EmailMessage
+
+# 콘솔 출력 UTF-8 강제 — Windows 로컬(cp949)에서 print 안의 em-dash(—) 등이
+# UnicodeEncodeError로 크래시하는 것 방지. Actions 러너는 이미 UTF-8이라 무영향.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ENV_PATH = os.path.join(BASE_DIR, ".env")
