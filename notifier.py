@@ -1,6 +1,7 @@
 """롱돌이 이메일 알림 모듈 — Gmail SMTP로 본인에게 발송."""
 import os
 import sys
+import re
 import json
 import smtplib
 import ssl
@@ -384,11 +385,15 @@ def check_and_notify_macro(macro_total: float, scores: dict | None = None) -> No
     delta_already_today = (last_delta_date == today_str)
 
     # VIX 일변동 급등: 절대 레벨·등급이 안정이어도 변동성 점프 자체를 경보 (당일 1회)
-    vix_chg = scores.get("vix_chg") if scores else None
-    try:
-        vix_chg = float(vix_chg)
-    except (TypeError, ValueError):
-        vix_chg = None
+    # vix_chg는 '+12.79%' 같은 포맷 문자열일 수 있으므로 숫자만 파싱한다.
+    _vc_raw = scores.get("vix_chg") if scores else None
+    vix_chg = None
+    if _vc_raw is not None and _vc_raw != "":
+        try:
+            vix_chg = float(_vc_raw)
+        except (TypeError, ValueError):
+            _m = re.search(r"[+-]?\d+\.?\d*", str(_vc_raw))
+            vix_chg = float(_m.group()) if _m else None
     vix_spike_trigger = (vix_chg is not None and vix_chg >= VIX_SPIKE_PCT)
     vix_spike_already_today = (state.get("last_vix_spike_date") == today_str)
 

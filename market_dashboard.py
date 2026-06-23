@@ -1557,11 +1557,24 @@ VIX_SPIKE_PCT = 10.0  # 일변동 ≥ +10%
 _GRADE_ORDER = {"안정": 0, "주의": 1, "위험": 2, "고위험": 3}
 
 def _vix_spike(d):
-    """VIX 일변동률(%)이 임계 이상이면 그 값, 아니면 None."""
-    try:
-        c = float(d.get("vix_chg"))
-    except (TypeError, ValueError):
+    """VIX 일변동률(%)이 임계 이상이면 그 값, 아니면 None.
+    vix_chg는 '+12.79%' 같은 포맷 문자열이므로 숫자만 파싱한다."""
+    raw = d.get("vix_chg")
+    if raw is None or raw == "":
         return None
+    if isinstance(raw, str):
+        m = re.search(r"[+-]?\d+\.?\d*", raw)
+        if not m:
+            return None
+        try:
+            c = float(m.group())
+        except ValueError:
+            return None
+    else:
+        try:
+            c = float(raw)
+        except (TypeError, ValueError):
+            return None
     return c if c >= VIX_SPIKE_PCT else None
 
 def _floor_grade(grade, floor="주의"):
