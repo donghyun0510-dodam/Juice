@@ -1551,6 +1551,23 @@ st.markdown("")
 # ── 하위 지수 4개 ──
 st.markdown('<p class="section-title">매크로 분석</p>', unsafe_allow_html=True)
 
+# 동적 급등 경보: 절대 레벨(밴드 임계값)은 그대로 두되, VIX 일변동이 급등하면
+# 레벨이 안정 구간이어도 S-Risk 상태를 '주의'로 격상한다(변동성 점프 자체를 경보).
+VIX_SPIKE_PCT = 10.0  # 일변동 ≥ +10%
+_GRADE_ORDER = {"안정": 0, "주의": 1, "위험": 2, "고위험": 3}
+
+def _vix_spike(d):
+    """VIX 일변동률(%)이 임계 이상이면 그 값, 아니면 None."""
+    try:
+        c = float(d.get("vix_chg"))
+    except (TypeError, ValueError):
+        return None
+    return c if c >= VIX_SPIKE_PCT else None
+
+def _floor_grade(grade, floor="주의"):
+    """grade가 floor보다 낮으면 floor로 끌어올림(이미 같거나 높으면 유지)."""
+    return grade if _GRADE_ORDER.get(grade, 0) >= _GRADE_ORDER.get(floor, 1) else floor
+
 sub_indices = [
     ("T-RISK", "금리", d["t_risk"], 100, (25, 50, 75), d.get("t_risk_delta")),
     ("FX-RISK", "환율", d["fx_risk"], 100, (30, 60, 85), d.get("fx_risk_delta")),
@@ -1599,6 +1616,10 @@ for col, (code, label, score, max_score, th, delta) in zip(cols, sub_indices):
             )
             continue
         g = risk_grade(score, th)
+        _spike_mark = ""
+        if code == "S-RISK" and _vix_spike(d) is not None:
+            g = _floor_grade(g)            # VIX 급등 시 레벨 안정이어도 주의로 격상
+            _spike_mark = " ⚡"
         sc = grade_css_color(g)
         pct = min(score / max_score * 100, 100)
         # 그라데이션을 max 구간(0~100)으로 펼친 뒤 fill 너비(pct)에 비례해 잘라 보이게 함
@@ -1610,7 +1631,7 @@ for col, (code, label, score, max_score, th, delta) in zip(cols, sub_indices):
                 <div style="position:absolute;top:0;left:0;right:0;height:2px;background:{sc};"></div>
                 <p class="sc-label">{code}</p>
                 <p class="sc-score" style="color:{sc};">{score:.0f}{_delta_html(delta)}</p>
-                <p class="sc-grade" style="color:{sc};">{label} · {g}</p>
+                <p class="sc-grade" style="color:{sc};">{label} · {g}{_spike_mark}</p>
                 <div class="sc-bar"><div class="sc-bar-fill" style="width:{pct:.0f}%;background:{bar_grad};background-size:{bar_bg_size};background-position:0 0;"></div></div>
             </div>
             """,
@@ -1708,10 +1729,17 @@ with st.expander(_c_label):
 # ── 위험 심리 세부 (S-Risk: VIX 베이스 + 신용·금급등·달러급등 가산) ──
 _s_val = d.get("s_risk", d["vix_score"])
 v_g = risk_grade(_s_val, (30, 60, 85))
-with st.expander(f"위험 심리 — S-Risk {_s_val:.0f}점 · {v_g}"):
+_s_spike = _vix_spike(d)
+_spike_title = ""
+if _s_spike is not None:
+    v_g = _floor_grade(v_g)
+    _spike_title = f" · ⚡VIX +{_s_spike:.1f}% 급등"
+with st.expander(f"위험 심리 — S-Risk {_s_val:.0f}점 · {v_g}{_spike_title}"):
     rows = []
     if d["vix"] is not None:
         g, _ = assess_risk("VIX", d["vix"])
+        if _s_spike is not None:
+            g = _floor_grade(g)            # VIX 급등 시 레벨(20 미만)이어도 주의로 격상
         if d.get("vix_is_futures"):
             vix_label = _tt("CBOE VIX (선물)", "^VIX", "yfinance", "VIX 선물 (현물 폐장 시) — S-Risk 베이스")
         else:

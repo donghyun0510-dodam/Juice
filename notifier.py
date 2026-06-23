@@ -26,6 +26,7 @@ MACRO_SNAPSHOT_PATH = os.path.join(BASE_DIR, "macro_snapshot.json")
 DELTA_THRESHOLD = 10.0          # macro_total 변화량 임계
 HYSTERESIS = 3.0                # 등급 경계 완충점수 (±3)
 COOLDOWN_MIN = 30               # 동일 방향 알림 쿨다운 (분)
+VIX_SPIKE_PCT = 10.0            # VIX 일변동 급등 알림 임계(%) — 레벨/등급 안정이어도 변동성 점프 경보
 GRADE_ORDER = ["안정", "주의", "위험", "고위험"]
 
 # 성과 기록 시트
@@ -359,6 +360,7 @@ def check_and_notify_macro(macro_total: float, scores: dict | None = None) -> No
     알림 조건:
       1) 등급 전환(히스테리시스) — 악화 시 쿨다운 무시
       2) 전일 종가 점수 대비 |Δ| >= DELTA_THRESHOLD — 당일 1회만
+      3) VIX 일변동 >= VIX_SPIKE_PCT 급등 — 레벨·등급 안정이어도 경보, 당일 1회만
     """
     if macro_total is None:
         return
@@ -381,6 +383,15 @@ def check_and_notify_macro(macro_total: float, scores: dict | None = None) -> No
     # 같은 날 전일대비 급변 알림을 이미 보냈으면 재알림 방지 (당일 1회)
     delta_already_today = (last_delta_date == today_str)
 
+    # VIX 일변동 급등: 절대 레벨·등급이 안정이어도 변동성 점프 자체를 경보 (당일 1회)
+    vix_chg = scores.get("vix_chg") if scores else None
+    try:
+        vix_chg = float(vix_chg)
+    except (TypeError, ValueError):
+        vix_chg = None
+    vix_spike_trigger = (vix_chg is not None and vix_chg >= VIX_SPIKE_PCT)
+    vix_spike_already_today = (state.get("last_vix_spike_date") == today_str)
+
     # 쿨다운: 등급 알림에만 적용 (악화는 무시)
     in_cooldown = False
     if last_alert_ts:
@@ -396,6 +407,7 @@ def check_and_notify_macro(macro_total: float, scores: dict | None = None) -> No
 
     should_notify = False
     is_delta_alert = False
+    is_vix_spike_alert = False
     subject = ""
     body_lines = []
 
@@ -415,6 +427,15 @@ def check_and_notify_macro(macro_total: float, scores: dict | None = None) -> No
         body_lines.append(f"매크로 종합 점수가 전일 종가 대비 {DELTA_THRESHOLD}점 이상 변화했습니다.")
         body_lines.append(f"전일: {yday_total:.2f} → 현재: {macro_total:.2f} ({sign}{dod_delta:.2f})")
         body_lines.append(f"현재 등급: {new_grade}")
+    elif vix_spike_trigger and not vix_spike_already_today:
+        should_notify = True
+        is_vix_spike_alert = True
+        _vlvl = scores.get("vix") if scores else None
+        _lvl_str = f"{_vlvl:.2f}" if isinstance(_vlvl, (int, float)) else "?"
+        subject = f"[롱돌이] VIX 급등 +{vix_chg:.1f}% (현재 {_lvl_str}) — 변동성 경보"
+        body_lines.append(f"VIX가 전일 대비 +{vix_chg:.2f}% 급등했습니다 (현재 {_lvl_str}).")
+        body_lines.append(f"절대 레벨·매크로 등급은 {new_grade}이지만, 변동성 점프로 위험심리 주의 신호입니다.")
+        body_lines.append(f"매크로 종합: {macro_total:.2f} ({new_grade})")
 
     if should_notify:
         body_lines.append(f"\n시각: {now.strftime('%Y-%m-%d %H:%M:%S')}")
@@ -425,6 +446,8 @@ def check_and_notify_macro(macro_total: float, scores: dict | None = None) -> No
             state["last_grade"] = new_grade
             if is_delta_alert:
                 state["last_delta_date"] = today_str
+            if is_vix_spike_alert:
+                state["last_vix_spike_date"] = today_str
             _save_state(state)
             return
 
