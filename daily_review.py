@@ -1497,8 +1497,33 @@ def scan_kr_featured_stocks(existing_tickers):
     return featured
 
 
+def _investing_kr_bond_3y():
+    """investing.com 국고채 3년물 — 소수 3자리 레벨+등락률.
+    cloudscraper 재사용(GH Actions IP에서 plain requests는 Cloudflare 403). 실패 시 (None, None)."""
+    try:
+        url = "https://kr.investing.com/rates-bonds/south-korea-3-year-bond-yield"
+        resp = _get_calendar_scraper().get(url, timeout=20)
+        soup = BeautifulSoup(resp.text, "html.parser")
+        price_el = soup.find(attrs={"data-test": "instrument-price-last"})
+        change_el = soup.find(attrs={"data-test": "instrument-price-change-percent"})
+        price = price_el.get_text(strip=True) if price_el else ""
+        change_pct = change_el.get_text(strip=True).strip("()") if change_el else ""
+        if price:
+            return f"{price}%", change_pct
+    except Exception as e:
+        print(f"  investing 국고채 보완 실패: {e}")
+    return None, None
+
+
 def get_kr_bond_3y():
-    """한국 국채 3년물 금리 — 네이버 금융 primary (클라우드 IP OK), investing.com 폴백."""
+    """한국 국채 3년물 금리.
+
+    네이버는 클라우드 IP에서 안정적이나 **소수 2자리(3.77)** 표기라 0.01 미만 변동이
+    보합(0.00%)으로 뭉개진다(예: 3.772→3.779, 실제 +0.19%인데 네이버는 0.00%).
+    → investing.com(소수 3자리)이 닿으면 레벨·등락률을 그걸로 대체해 정밀도를 보완하고,
+      investing이 막히면 네이버 값을 유지한다(최악의 경우 종전 동작과 동일).
+    """
+    naver_val, naver_chg = None, None
     try:
         url = "https://finance.naver.com/marketindex/interestDailyQuote.naver?marketindexCd=IRR_GOVT03Y"
         resp = req.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
@@ -1506,26 +1531,18 @@ def get_kr_bond_3y():
         if len(nums) >= 2:
             close = float(nums[0]); prev = float(nums[1])
             chg = (close - prev) / prev * 100
-            chg_str = f"{chg:+.2f}%"
-            print(f"  한국 국채 3년물 (naver): {close:.3f}% {chg_str}")
-            return f"{close:.3f}%", chg_str
+            naver_val, naver_chg = f"{close:.3f}%", f"{chg:+.2f}%"
+            print(f"  한국 국채 3년물 (naver): {naver_val} {naver_chg}")
     except Exception as e:
-        print(f"  naver 실패 → investing.com 폴백: {e}")
-    # 폴백: investing.com
-    try:
-        url = "https://kr.investing.com/rates-bonds/south-korea-3-year-bond-yield"
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-        resp = req.get(url, headers=headers, timeout=15)
-        soup = BeautifulSoup(resp.text, "html.parser")
-        price_el = soup.find(attrs={"data-test": "instrument-price-last"})
-        price = price_el.get_text(strip=True) if price_el else ""
-        change_el = soup.find(attrs={"data-test": "instrument-price-change-percent"})
-        change_pct = change_el.get_text(strip=True).strip("()") if change_el else ""
-        if price:
-            print(f"  한국 국채 3년물 (investing): {price}% {change_pct}")
-            return f"{price}%", change_pct
-    except Exception as e:
-        print(f"  한국 국채 3년물 실패: {e}")
+        print(f"  naver 국채 실패: {e}")
+
+    # 정밀도 보완: investing(소수 3자리)이 네이버 2자리 반올림으로 뭉갠 미세 변동을 잡는다.
+    inv_val, inv_chg = _investing_kr_bond_3y()
+    if inv_val:
+        print(f"  한국 국채 3년물 (investing 보완): {inv_val} {inv_chg}")
+        return inv_val, inv_chg
+    if naver_val:
+        return naver_val, naver_chg
     return "", ""
 
 
