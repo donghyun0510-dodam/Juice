@@ -183,7 +183,19 @@ def naver_quote(key):
     strat, code = spec
     try:
         if strat == "bond":
-            return _from_item(_get_json(f"{_API}/marketindex/bond/{code}"))
+            # 미 국채 실시간 호가는 미 마감(17:05 ET) 직후 closePrice가 야간 세션 값으로
+            # 넘어가지만 fluctuationsRatio의 '전일 종가' 기준 롤오버가 지연돼, 등락률이
+            # 두 세션분(전일 정산→야간 라이브)을 잡는다. daily-global(21:37 ET)이 이 구간과
+            # 겹침. 실시간 등락률의 내재 base가 최신 정산 종가(일별 바)와 어긋나면 stale로
+            # 보고 일별 정산 바를 신뢰한다(원자재 PREOPEN 가드의 채권 버전).
+            live = _from_item(_get_json(f"{_API}/marketindex/bond/{code}"))
+            daily = _prices_latest("bond", code)  # 최신 정산 일별 바(전일대비 정상)
+            if (live[0] is not None and live[2] is not None
+                    and daily[0] not in (None, 0)):
+                implied_base = live[0] / (1.0 + live[2] / 100.0)
+                if abs(implied_base - daily[0]) / daily[0] > 0.001:
+                    return daily  # 롤오버 지연 감지 → 일별 정산 종가로 대체
+            return live if live[0] is not None else daily
         if strat == "index":
             return _from_item(_get_json(f"{_API}/index/{code}/basic"))
         if strat == "metals":
