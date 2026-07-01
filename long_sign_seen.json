@@ -1,5 +1,8 @@
 {
-  "seen": [
+  "seen": [],
+  "ts": "2026-06-25T08:24:39.002332",
+  "last_added": [],
+  "last_removed": [
     "ABNB",
     "ADI",
     "BEN",
@@ -22,53 +25,7 @@
     "TEL",
     "WDC"
   ],
-  "ts": "2026-04-18T09:27:25.318300",
-  "last_added": [
-    "ABNB",
-    "ADI",
-    "BEN",
-    "BK",
-    "DLR",
-    "EBAY",
-    "GOOGL",
-    "IBKR",
-    "JBHT",
-    "MCHP",
-    "STLD",
-    "TEL"
-  ],
-  "last_removed": [
-    "000150.KS",
-    "006360.KS",
-    "006800.KS",
-    "010170.KQ",
-    "028050.KS",
-    "032830.KS",
-    "043260.KQ",
-    "062040.KS",
-    "064760.KQ",
-    "078930.KS",
-    "082920.KQ",
-    "100790.KQ",
-    "101490.KQ",
-    "120110.KS",
-    "178320.KQ",
-    "218410.KQ",
-    "353200.KS",
-    "375500.KS",
-    "EME",
-    "FIX",
-    "GLW",
-    "GRMN",
-    "HUBB",
-    "KEYS",
-    "KLAC",
-    "STT",
-    "TER",
-    "TT",
-    "WAB"
-  ],
-  "last_prev_count": 38,
-  "last_cur_count": 21,
-  "last_diff_ts": "2026-04-18T09:27:25.318305"
+  "last_prev_count": 21,
+  "last_cur_count": 0,
+  "last_diff_ts": "2026-06-25T08:24:39.002336"
 }
