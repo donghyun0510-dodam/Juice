@@ -17,7 +17,7 @@ from market_common import classify_signal, SIGNAL_LABEL_KR, save_snapshot
 from scouter_core import get_yield_live
 from naver_macro import (
     naver_quote, naver_quote_for_ticker, naver_quote_fmt_for_ticker,
-    naver_index, naver_kr_stock, naver_index_date,
+    naver_index, naver_kr_stock, naver_index_date, naver_settled_date,
 )
 from bs4 import BeautifulSoup
 import re
@@ -185,10 +185,10 @@ def get_price(ticker_symbol):
         return ""
 
 
-def get_price_and_change(ticker_symbol):
-    """종가와 등락률 둘 다 반환"""
+def get_price_and_change(ticker_symbol, settled=False):
+    """종가와 등락률 둘 다 반환. settled=True면 원자재·채권은 정산 일별 바 사용."""
     # 네이버 1차 (매크로/위험심리 매핑 티커만; BTC·지수는 매핑 없어 폴백)
-    ps, cs, val = naver_quote_fmt_for_ticker(ticker_symbol)
+    ps, cs, val = naver_quote_fmt_for_ticker(ticker_symbol, settled=settled)
     if val is not None:
         return ps, cs
     try:
@@ -214,8 +214,8 @@ def _yf_daily_pct(ticker):
     """최근 2개 일봉 종가 간 %변동. compute_c_risk_index 모멘텀 입력 전용 — 실시간
     티커의 슬라이딩 1-day %change와 달리 세션 휴지기에도 값이 고정(주말 Fri settle 유지).
     단 BTC 등 24/7 종목은 UTC 00:00에 캔들이 롤오버되므로 완전 고정은 아님."""
-    # 네이버 1차: fluctuationsRatio(전일 종가 대비 일변동률). PREOPEN은 일별 바로 대체.
-    _v, _c, ratio = naver_quote_for_ticker(ticker)
+    # 네이버 1차: 원자재·채권은 정산 일별 바(settled), FX/지수는 라이브 등락률.
+    _v, _c, ratio = naver_quote_for_ticker(ticker, settled=True)
     if ratio is not None:
         return ratio
     try:
@@ -296,8 +296,12 @@ def _scrape_investing(url):
 
 
 def _yf_commodity_2f(ticker, multiplier=1.0, fmt="{:,.2f}"):
-    """원자재 가격·등락률 반환. 네이버 1차(원자재는 PREOPEN 시 일별 바), yfinance 폴백."""
-    nval, nchg, _ = naver_quote_for_ticker(ticker)
+    """원자재 가격·등락률 반환. 네이버 정산 일별 바 1차, yfinance 폴백.
+
+    일일 리뷰는 미 장 마감 후 실행되므로 필요한 건 '직전 세션 정산값'이다. 네이버
+    라이브는 재개장(18:00 ET) 뒤면 이미 다음 세션 값이라 쓰면 안 된다.
+    """
+    nval, nchg, _ = naver_quote_for_ticker(ticker, settled=True)
     if nval is not None:
         v = nval * multiplier
         return fmt.format(v), nchg, v
@@ -778,13 +782,17 @@ def build_global_sheet(target_date):
     usd_jpy, usd_jpy_chg = get_price_and_change("JPY=X")
     usd_cny, usd_cny_chg = get_price_and_change("CNY=X")
 
-    # 매크로 - 원자재 (Investing.com 실시간 스크래핑)
-    brent, brent_chg = get_price_and_change("BZ=F")
-    print("  investing.com: WTI/Gold/Silver/Copper/VIX선물 가격 확인 중...")
+    # 매크로 - 원자재 — 네이버 정산 일별 바(직전 세션 종가) 1차, 실패 시 investing.com
+    brent, brent_chg = get_price_and_change("BZ=F", settled=True)
+    print("  원자재: 네이버 정산 일별 바 확인 중...")
     wti, wti_chg, _wti_val = get_wti_investing()
     gold_price, gold_chg, _gold_val = get_gold_investing()
     silver_price, silver_chg, silver_val = get_silver_investing()
     copper, copper_chg, copper_val = get_copper_investing()
+    _bar_dates = {k: naver_settled_date(k) for k in ("WTI", "BRENT", "GOLD", "SILVER", "COPPER")}
+    print(f"    정산 바 거래일: {_bar_dates}")
+    if len(set(d for d in _bar_dates.values() if d)) > 1:
+        print("    ⚠️ 원자재 정산 바 거래일이 서로 다름 — 일부 지표가 직전 세션이 아닐 수 있음")
 
     # 위험 심리 — VIX는 현물가 우선, 실패 시 선물
     vix_price, vix_chg = get_price_and_change("^VIX")

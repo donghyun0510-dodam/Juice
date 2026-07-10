@@ -39,7 +39,9 @@ def _update_macro_snapshot(scores: dict) -> None:
 
 
 def main():
-    scores = collect_macro_scores()
+    # 미 장 마감 후(05:17 KST = 20:17 ET) 실행 — 원자재는 정산 일별 바를 써야 직전 세션
+    # 종가가 기록된다. 라이브는 18:00 ET 재개장 뒤 다음 세션 값이라 타임시리즈가 오염됨.
+    scores = collect_macro_scores(settled=True)
 
     # 디버그 로그
     keys = ["t_risk", "fx_risk", "c_risk", "vix_score", "s_risk", "macro_total"]

@@ -134,9 +134,9 @@ def _live_and_prev(tk):
     return None, None
 
 
-def get_price_and_change(ticker_symbol):
+def get_price_and_change(ticker_symbol, settled=False):
     # 네이버 1차 (매크로/위험심리 매핑 티커만; BTC·지수·종목은 매핑 없어 폴백)
-    ps, cs, val = naver_quote_fmt_for_ticker(ticker_symbol)
+    ps, cs, val = naver_quote_fmt_for_ticker(ticker_symbol, settled=settled)
     if val is not None:
         return ps, cs, val
     try:
@@ -180,12 +180,15 @@ def _yf_prev_close(ticker):
     return None
 
 
-def _yf_daily_pct(ticker):
+def _yf_daily_pct(ticker, settled=False):
     """최근 2개 일봉 종가 간 %변동. compute_c_risk 모멘텀 입력 전용 — 실시간 티커의
     슬라이딩 1-day %change와 달리 세션 휴지기에도 값이 고정(주말 Fri settle 유지).
-    단 BTC 등 24/7 종목은 UTC 00:00에 캔들이 롤오버되므로 완전 고정은 아님."""
-    # 네이버 1차: fluctuationsRatio(전일 종가 대비 일변동률). PREOPEN은 일별 바로 대체.
-    _v, _c, ratio = naver_quote_for_ticker(ticker)
+    단 BTC 등 24/7 종목은 UTC 00:00에 캔들이 롤오버되므로 완전 고정은 아님.
+
+    settled=True(마감 후 배치): 원자재는 네이버 정산 일별 바 — 재개장 뒤 라이브가
+    주는 '다음 세션 몇 분치' 등락률을 배제한다."""
+    # 네이버 1차: fluctuationsRatio(전일 종가 대비 일변동률).
+    _v, _c, ratio = naver_quote_for_ticker(ticker, settled=settled)
     if ratio is not None:
         return ratio
     try:
@@ -234,17 +237,17 @@ def _scrape_investing(url):
         return "", "", None
 
 
-# 원자재: yfinance 선물 primary
-def _yf_commodity(ticker_symbol):
-    price_str, chg_str, val = get_price_and_change(ticker_symbol)
+# 원자재: 네이버 primary (settled=True면 정산 일별 바), yfinance/investing 폴백
+def _yf_commodity(ticker_symbol, settled=False):
+    price_str, chg_str, val = get_price_and_change(ticker_symbol, settled=settled)
     if val is not None:
         return price_str, chg_str, val
     return "", "", None
 
 
-def get_copper_investing():
-    # yfinance HG=F ($/lb) × 2204.62 → $/톤. yfinance 실패 시 investing.com($/lb) 폴백.
-    y = _yf_commodity("HG=F")
+def get_copper_investing(settled=False):
+    # HG=F ($/lb) × 2204.62 → $/톤. 실패 시 investing.com($/lb) 폴백.
+    y = _yf_commodity("HG=F", settled=settled)
     if y[2] is not None:
         ton = y[2] * 2204.62
         return f"{ton:,.0f}", y[1], ton
@@ -255,22 +258,22 @@ def get_copper_investing():
     return "", "", None
 
 
-def get_wti_investing():
-    y = _yf_commodity("CL=F")
+def get_wti_investing(settled=False):
+    y = _yf_commodity("CL=F", settled=settled)
     if y[2] is not None:
         return y
     return _scrape_investing("https://kr.investing.com/commodities/crude-oil")
 
 
-def get_brent_investing():
-    y = _yf_commodity("BZ=F")
+def get_brent_investing(settled=False):
+    y = _yf_commodity("BZ=F", settled=settled)
     if y[2] is not None:
         return y
     return _scrape_investing("https://kr.investing.com/commodities/brent-oil")
 
 
-def get_gold_investing():
-    y = _yf_commodity("GC=F")
+def get_gold_investing(settled=False):
+    y = _yf_commodity("GC=F", settled=settled)
     if y[2] is not None:
         return y
     return _scrape_investing("https://kr.investing.com/commodities/gold")
@@ -280,8 +283,8 @@ def get_vix_futures_investing():
     return _yf_commodity("^VIX")
 
 
-def get_silver_investing():
-    return _yf_commodity("SI=F")
+def get_silver_investing(settled=False):
+    return _yf_commodity("SI=F", settled=settled)
 
 
 # 미국 채권: CNBC primary (실시간), yfinance 폴백
@@ -753,8 +756,12 @@ def _compute_yesterday_baseline():
 # ──────────────────────────────────────────────
 # 통합 수집 — dashboard collect_all_data와 동일한 로직의 점수 산출
 # ──────────────────────────────────────────────
-def collect_macro_scores() -> dict:
+def collect_macro_scores(settled=False) -> dict:
     """대시보드와 동일한 방식으로 fetch하고 매크로 점수 반환.
+
+    settled=True: 미 장 마감 후 배치(scouter_logger)용 — 원자재는 네이버 정산 일별 바만
+    쓴다. 라이브는 18:00 ET 재개장 뒤 '다음 세션'의 몇 분치 등락률이라 직전 세션 종가를
+    기록해야 하는 타임시리즈를 오염시킨다. 대시보드(장중)는 기본값 False로 라이브 유지.
 
     반환: {"t_risk", "fx_risk", "c_risk", "vix_score", "macro_total",
            "wti", "brent", "gold", "copper", "vix", "oil_avg", "gc_ratio",
@@ -776,11 +783,11 @@ def collect_macro_scores() -> dict:
 
     # 원자재 (병렬)
     with ThreadPoolExecutor(max_workers=5) as ex:
-        f_wti = ex.submit(get_wti_investing)
-        f_copper = ex.submit(get_copper_investing)
-        f_gold = ex.submit(get_gold_investing)
-        f_silver = ex.submit(get_silver_investing)
-        f_brent = ex.submit(get_brent_investing)
+        f_wti = ex.submit(get_wti_investing, settled)
+        f_copper = ex.submit(get_copper_investing, settled)
+        f_gold = ex.submit(get_gold_investing, settled)
+        f_silver = ex.submit(get_silver_investing, settled)
+        f_brent = ex.submit(get_brent_investing, settled)
     _, wti_chg, wti = f_wti.result()
     _, brent_chg, brent = f_brent.result()
     _, copper_chg, copper = f_copper.result()
@@ -800,12 +807,12 @@ def collect_macro_scores() -> dict:
     # 모멘텀 입력은 yfinance 일봉 간 %변동 사용 — 실시간 슬라이딩 %change는 세션 마감
     # 후에도 값이 계속 바뀌어 daily_review 스냅샷과 dashboard/scouter 점수가 어긋남.
     with ThreadPoolExecutor(max_workers=6) as ex:
-        f_wti_d = ex.submit(_yf_daily_pct, "CL=F")
-        f_brent_d = ex.submit(_yf_daily_pct, "BZ=F")
-        f_gold_d = ex.submit(_yf_daily_pct, "GC=F")
-        f_silver_d = ex.submit(_yf_daily_pct, "SI=F")
-        f_copper_d = ex.submit(_yf_daily_pct, "HG=F")
-        f_btc_d = ex.submit(_yf_daily_pct, "BTC-USD")
+        f_wti_d = ex.submit(_yf_daily_pct, "CL=F", settled)
+        f_brent_d = ex.submit(_yf_daily_pct, "BZ=F", settled)
+        f_gold_d = ex.submit(_yf_daily_pct, "GC=F", settled)
+        f_silver_d = ex.submit(_yf_daily_pct, "SI=F", settled)
+        f_copper_d = ex.submit(_yf_daily_pct, "HG=F", settled)
+        f_btc_d = ex.submit(_yf_daily_pct, "BTC-USD", settled)
     wti_daily = f_wti_d.result()
     brent_daily = f_brent_d.result()
     gold_daily = f_gold_d.result()
