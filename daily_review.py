@@ -185,6 +185,36 @@ def get_price(ticker_symbol):
         return ""
 
 
+def us_traded_on(target_date):
+    """target_date에 미 증시가 실제로 열렸는지. True/False, 판단 불가 시 None.
+
+    '휴장'과 '일봉 아직 미게시'를 구분해야 한다. 실행 시각(18:35~18:52 ET)엔 yfinance가
+    당일 바를 안 준 것인지 휴장인지 알 수 없어, 과거 이 구분에 실패해 휴장일(2026-07-03)에
+    전일 데이터를 복제한 유령 시트가 만들어졌다.
+    → 네이버 지수의 localTradedAt(마감 직후 즉시 반영되는 '최신 거래일')을 1차 권위로 삼는다.
+      · 최신 거래일 == 대상일  → 열렸다
+      · 최신 거래일 <  대상일  → 대상일엔 아직 거래가 없었다(휴장/미래)
+      · 최신 거래일 >  대상일  → 과거 날짜 질의 → yfinance 일봉 인덱스로 판정
+    """
+    def _yf_has_bar(d):
+        try:
+            h = yf.download("^GSPC", period="3mo", progress=False)
+            if h is not None and not h.empty:
+                return d.strftime("%Y-%m-%d") in {i.strftime("%Y-%m-%d") for i in h.index}
+        except Exception:
+            pass
+        return None
+
+    latest = naver_index_date(".DJI")
+    if latest is None:
+        return _yf_has_bar(target_date)  # 네이버 실패 → yfinance 단독 판정
+    if latest.date() == target_date.date():
+        return True
+    if latest.date() < target_date.date():
+        return False
+    return _yf_has_bar(target_date)  # 과거 날짜
+
+
 def get_price_and_change(ticker_symbol, settled=False):
     """종가와 등락률 둘 다 반환. settled=True면 원자재·채권은 정산 일별 바 사용."""
     # 네이버 1차 (매크로/위험심리 매핑 티커만; BTC·지수는 매핑 없어 폴백)
@@ -2242,14 +2272,14 @@ def main():
 
     # 글로벌 시트: 전일 휴장일 체크
     if not korea_only:
-        check = yf.download("^GSPC", start=yesterday.strftime("%Y-%m-%d"),
-                            end=(yesterday + timedelta(days=1)).strftime("%Y-%m-%d"),
-                            progress=False)
-        if check.empty:
-            print(f"전일({yesterday.strftime('%Y-%m-%d')}) 미국 증시 휴장 → 글로벌 스킵")
+        traded = us_traded_on(yesterday)
+        if traded is not True:
+            why = "미국 증시 휴장" if traded is False else "⚠️ 거래일 판단 불가(소스 실패)"
+            print(f"전일({yesterday.strftime('%Y-%m-%d')}) {why} → 글로벌 스킵")
             if global_only:
-                return
-            # 글로벌+국장 모드에서 미국 휴장이면 국장만 진행
+                # 휴장이면 정상 종료, 판단 불가면 실패로 알림(조용한 유령 시트 방지)
+                sys.exit(0 if traded is False else 1)
+            # 글로벌+국장 모드면 국장만 진행
             global_only = False
             korea_only = True
             mode = "국장만 (미국 휴장)"

@@ -21,6 +21,7 @@ python daily_review.py
 데이터 수집·시트 기록 코드를 건드리기 전에 반드시 읽는다. 예외도 로그도 없이 **값만 조용히 틀리는** 실패들이 정리돼 있다.
 - 마감 후 배치(`daily_review`·`scouter_logger`)는 원자재·채권을 **`settled=True`(정산 일별 바)**로 읽는다. 라이브는 재개장 뒤 *다음 세션* 값이다.
 - **시각 가정에 기대는 가드를 만들지 말 것** — GH Actions cron은 상시 ~1시간 지연된다(21:37 UTC 예약 → 실제 18:35~18:52 ET 실행).
+- 휴장일 판정은 `us_traded_on(target_date)` (네이버 `.DJI` localTradedAt 1차). **소스의 빈 응답을 "휴장"으로 해석하지 말 것** — "아직 미게시"와 구분되지 않는다.
 - 시트에 등락률 쓸 때 `value_input_option="RAW"` (USER_ENTERED는 `"+4.37%"`를 숫자 `0.0437`로 바꾼다).
 
 ## 데이터 소스
