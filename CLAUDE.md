@@ -40,7 +40,7 @@ python daily_review.py
 - 적용 파일(중복 정의 동기): `daily_review.py`(증시리뷰), `scouter_core.py`(스카우터 코어 — `scouter_logger`·대시보드 공유), `market_dashboard.py`. `get_yield_live`/`get_price_and_change`/`_yf_daily_pct`/`_yf_commodity_2f`에 주입.
 
 ### 국장 시트 네이버 전환 (`build_korea_sheet`)
-- 아시아 지수(`naver_index('.N225'/'.TWII'/'.HSI'/'.SSEC')`), 국내 지수(`naver_index('KOSPI'/'KPI200'/'KOSDAQ')` — 국내는 `m.stock.naver.com/api/index/{code}/basic`), 달러/원(`naver_quote('USDKRW')`=FX_USDKRW), WTI(글로벌과 동일 `naver_quote('WTI')`)를 **네이버 1차 + 기존(FDR/yfinance+ETF) 폴백**으로 전환. KR 국고채 3년물은 기존부터 네이버(`finance.naver.com/marketindex/interestDailyQuote IRR_GOVT03Y`).
+- 아시아 지수(`naver_index('.N225'/'.TWII'/'.HSI'/'.SSEC')`), 국내 지수(`naver_index('KOSPI'/'KPI200'/'KOSDAQ')` — 국내는 `m.stock.naver.com/api/index/{code}/basic`), 달러/원(`naver_quote('USDKRW')`=FX_USDKRW), WTI(글로벌과 동일 `naver_quote('WTI')`)를 **네이버 1차 + 기존(FDR/yfinance+ETF) 폴백**으로 전환. KR 국고채 3년물은 **네이버증권 stock API(`api.stock.naver.com/marketindex/bond/KR3YT=RR`, 로이터 체결수익률=사용자가 네이버증권에서 보는 값) 1차 → investing.com → finance.naver marketindex(`IRR_GOVT03Y`, 금투협 고시) 최후 폴백**. ⚠️ 고시표는 체결수익률과 **별개 시리즈**라 등락률이 어긋난다(2026-07-10 고시 -0.27% vs 체결 -1.26%) — 1차로 쓰면 안 됨.
 - **KR 개별종목 stale 보정**: yfinance가 KRX 당일 일봉을 늦게 게시해 `⚠MM/DD`로 stale 마킹되는 종목(에스엠·JYP·CJ ENM·알테오젠 등)은, 그 종목만 `naver_kr_stock(6자리코드)`(`m.stock.naver.com/api/stock/{code}/basic`)로 등락률을 덮고 ⚠ 제거. 52주/MA·매매신호는 yfinance 2y 히스토리 기준 유지(등락률 표시만 보정).
 - **수급(외국인/기관/개인) 제외**: 네이버는 KOSPI+KOSDAQ 합산만 제공 → 사용자 수동 입력 유지.
 - **시트 날짜 정렬도 네이버 1차**: `--korea-only` 시 시트명 날짜를 `naver_index_date('KOSPI')`(KOSPI localTradedAt) 기준으로 맞추고 yfinance(069500.KS/^KS11) 폴백. 데이터 소스(네이버)와 날짜 소스를 일치시켜, yfinance 일봉 게시 지연 때 '시트=어제·데이터=오늘'로 어긋나는 사고 방지.

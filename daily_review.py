@@ -1553,15 +1553,55 @@ def _investing_kr_bond_3y():
     return None, None
 
 
+def _naver_stock_kr_bond_3y():
+    """네이버증권(api.stock.naver.com) 국고채 3년 — 로이터 실시간 체결수익률.
+
+    **사용자가 '네이버증권'에서 보는 값과 동일 소스.** closePrice(소수 3~4자리) +
+    fluctuationsRatio(정확한 전일대비 등락률). finance.naver.com/marketindex(금투협 '고시'
+    최종호가수익률, 2자리)와는 **별개 시리즈**라 등락률이 어긋난다 — 체결수익률(이 소스·investing)이 정답.
+    KR 채권은 US채권 같은 야간 재개장이 없어 마감(15:30) 후 closePrice가 당일 정산 종가라
+    마감 후 배치도 그대로 사용 가능(롤오버 지연 없음, marketStatus=CLOSE). 실패 시 (None, None)."""
+    try:
+        url = "https://api.stock.naver.com/marketindex/bond/KR3YT=RR"
+        resp = req.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
+        d = resp.json()
+        close = d.get("closePrice")
+        ratio = d.get("fluctuationsRatio")
+        if close and ratio is not None:
+            val = f"{float(str(close).replace(',', '')):.3f}%"
+            chg = f"{float(ratio):+.2f}%"
+            return val, chg
+    except Exception as e:
+        print(f"  네이버증권 국고채 실패: {e}")
+    return None, None
+
+
 def get_kr_bond_3y():
     """한국 국채 3년물 금리.
 
-    네이버는 클라우드 IP에서 안정적이나 **소수 2자리(3.77)** 표기라 0.01 미만 변동이
-    보합(0.00%)으로 뭉개진다(예: 3.772→3.779, 실제 +0.19%인데 네이버는 0.00%).
-    → investing.com(소수 3자리)이 닿으면 레벨·등락률을 그걸로 대체해 정밀도를 보완하고,
-      investing이 막히면 네이버 값을 유지한다(최악의 경우 종전 동작과 동일).
+    소스 우선순위:
+    1) **네이버증권 stock API**(api.stock.naver.com/marketindex/bond/KR3YT=RR) — 로이터 체결수익률.
+       사용자가 '네이버증권'에서 보는 값과 일치, 소수 3자리 + 정확한 등락률.
+    2) investing.com(소수 3자리) — 체결수익률, 1)과 근접(±0.1%p).
+    3) finance.naver.com/marketindex(IRR_GOVT03Y) — 금투협 '고시' 최종호가수익률(2자리).
+       **⚠️ 1)·2)의 체결수익률과 별개 시리즈**라 전일 대비 등락률이 어긋난다
+       (예 2026-07-10: 고시표는 3.76 -0.27%인데 실제 체결은 3.763 -1.26%). **최후 폴백으로만** 사용.
+
+    과거엔 3)을 1차로 쓰다 등락률이 통째로 틀렸다(고시표 2자리 뭉갬 + 별개 시리즈).
     """
-    naver_val, naver_chg = None, None
+    # 1차: 네이버증권 stock API (사용자가 보는 소스, 체결수익률)
+    val, chg = _naver_stock_kr_bond_3y()
+    if val:
+        print(f"  한국 국채 3년물 (네이버증권): {val} {chg}")
+        return val, chg
+
+    # 2차: investing (체결수익률, 소수 3자리)
+    inv_val, inv_chg = _investing_kr_bond_3y()
+    if inv_val:
+        print(f"  한국 국채 3년물 (investing): {inv_val} {inv_chg}")
+        return inv_val, inv_chg
+
+    # 3차(최후): finance.naver.com marketindex 고시표 — 별개 시리즈, 등락률 뭉갬 위험
     try:
         url = "https://finance.naver.com/marketindex/interestDailyQuote.naver?marketindexCd=IRR_GOVT03Y"
         resp = req.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
@@ -1569,18 +1609,10 @@ def get_kr_bond_3y():
         if len(nums) >= 2:
             close = float(nums[0]); prev = float(nums[1])
             chg = (close - prev) / prev * 100
-            naver_val, naver_chg = f"{close:.3f}%", f"{chg:+.2f}%"
-            print(f"  한국 국채 3년물 (naver): {naver_val} {naver_chg}")
+            print(f"  한국 국채 3년물 (naver marketindex 폴백·고시): {close:.3f}% {chg:+.2f}%")
+            return f"{close:.3f}%", f"{chg:+.2f}%"
     except Exception as e:
-        print(f"  naver 국채 실패: {e}")
-
-    # 정밀도 보완: investing(소수 3자리)이 네이버 2자리 반올림으로 뭉갠 미세 변동을 잡는다.
-    inv_val, inv_chg = _investing_kr_bond_3y()
-    if inv_val:
-        print(f"  한국 국채 3년물 (investing 보완): {inv_val} {inv_chg}")
-        return inv_val, inv_chg
-    if naver_val:
-        return naver_val, naver_chg
+        print(f"  naver marketindex 국채 실패: {e}")
     return "", ""
 
 
