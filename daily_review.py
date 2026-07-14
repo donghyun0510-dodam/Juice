@@ -269,8 +269,15 @@ def parse_price(price_str):
         return None
 
 
-def assess_risk(indicator, value):
-    """지표별 위험 수준 판단 → (라벨, RGB색상)"""
+def assess_risk(indicator, value, chg=None):
+    """지표별 위험 수준 판단 → (라벨, RGB색상)
+
+    절대 레벨 임계(thresholds)로 안정/주의/위험/고위험 판정 후, 급등 플로어 적용:
+    레벨상 '안정'이어도 하루 급등폭이 크면 최소 '주의'로 상향(레벨 기준은 그대로).
+      · WTI·BRN: 일변동 ≥ +5%
+      · VIX: 일변동 ≥ +10%
+    chg는 '+9.59%' 문자열 또는 float(%). 상향(안정→주의)만 하고 그 이상은 건드리지 않음.
+    """
     if value is None:
         return "", None
 
@@ -292,16 +299,27 @@ def assess_risk(indicator, value):
         "USD/CNY": (7.15, 7.25, 7.35),
     }
 
+    # 급등 플로어: 레벨상 안정이어도 하루 급등이면 최소 주의로 상향
+    spike_floor = {"WTI": 5.0, "BRN": 5.0, "VIX": 10.0}
+
     if indicator in thresholds:
         t1, t2, t3 = thresholds[indicator]
         if value <= t1:
-            return "안정", GREEN
+            label, color = "안정", GREEN
         elif value <= t2:
-            return "주의", YELLOW
+            label, color = "주의", YELLOW
         elif value <= t3:
-            return "위험", ORANGE
+            label, color = "위험", ORANGE
         else:
-            return "고위험", RED
+            label, color = "고위험", RED
+
+        thr = spike_floor.get(indicator)
+        if thr is not None and label == "안정":
+            c = parse_pct(chg) if isinstance(chg, str) else chg
+            if c is not None and c >= thr:
+                label, color = "주의", YELLOW
+
+        return label, color
 
     return "", None
 
@@ -550,12 +568,14 @@ def fetch_credit_dev_pct(window=20):
         return None
 
 
-def compute_s_risk_index(vix_val, credit_dev_pct=None, gold_chg=None, dxy_chg=None):
+def compute_s_risk_index(vix_val, credit_dev_pct=None, gold_chg=None, dxy_chg=None, vix_chg=None):
     """위험심리 종합 지수(S-Risk): VIX 베이스 + 신용·금·달러 가산, 100 캡.
       base=VIX_score(0~100), credit=HYG/IEF 추세이탈(0~25, dev−2.5%서 만점),
       gold=금 급등(0~15, +1.7%초과, +4.5%만점), dollar=DXY 급등(0~15, +0.3%초과*18).
     금·달러는 '급변(모멘텀)'만 — 레벨은 C-Risk·FX-Risk가 소유(이중계상 방지).
     금 모멘텀 2026-06-16 재캘리브레이션(floor 1.0→1.7%≈1σ, cap 20→15) — 상세는 scouter_core.compute_s_risk.
+    VIX 급등 등급 플로어: vix_chg(일변동%)가 ≥+10%면 점수는 그대로 두고 라벨만 최소 '주의'로
+    격상하고 ⚡를 붙인다(변동성 점프 자체를 경보 — 점수 가산 아님, 대시보드 _floor_grade와 동일 방침).
     반환: (label, color, total)."""
     GREEN = {"red": 0, "green": 0.6, "blue": 0}
     YELLOW = {"red": 0.8, "green": 0.8, "blue": 0}
@@ -580,13 +600,22 @@ def compute_s_risk_index(vix_val, credit_dev_pct=None, gold_chg=None, dxy_chg=No
     print(f"  S-Risk: VIX={base:.0f} 신용={credit:.0f} 금={gold:.0f} 달러={dollar:.0f} 종합={total:.0f}점")
 
     if total <= 30:
-        return f"안정({total:.0f}점)", GREEN, total
+        label, color = f"안정({total:.0f}점)", GREEN
     elif total <= 60:
-        return f"주의({total:.0f}점)", YELLOW, total
+        label, color = f"주의({total:.0f}점)", YELLOW
     elif total <= 85:
-        return f"위험({total:.0f}점)", ORANGE, total
+        label, color = f"위험({total:.0f}점)", ORANGE
     else:
-        return f"고위험({total:.0f}점)", RED, total
+        label, color = f"고위험({total:.0f}점)", RED
+
+    # VIX 급등 등급 플로어: 일변동 ≥ +10%면 점수(total)는 그대로, 라벨만 최소 주의로 격상 + ⚡
+    vc = _chg(vix_chg)
+    if vc is not None and vc >= 10.0:
+        if label.startswith("안정"):
+            label, color = f"주의({total:.0f}점)", YELLOW
+        label += " ⚡"
+
+    return label, color, total
 
 
 def compute_fx_risk_index(dxy_val, jpy_val, cny_val):
@@ -1045,8 +1074,8 @@ def build_global_sheet(target_date):
     brent_val = parse_price(brent)
     wti_val = parse_price(wti)
     gold_val = parse_price(gold_price)
-    brent_risk, brent_rc = assess_risk("BRN", brent_val)
-    wti_risk, wti_rc = assess_risk("WTI", wti_val)
+    brent_risk, brent_rc = assess_risk("BRN", brent_val, brent_chg)
+    wti_risk, wti_rc = assess_risk("WTI", wti_val, wti_chg)
     copper_risk, copper_rc = assess_copper_risk()
     # 모멘텀 입력은 yfinance 일봉 간 %변동 사용 — 실시간 슬라이딩 %change는 세션 마감
     # 후에도 값이 계속 바뀌어 daily_review 스냅샷과 dashboard/scouter 점수가 어긋남.
@@ -1077,12 +1106,12 @@ def build_global_sheet(target_date):
         copper_chg=_copper_daily, btc_chg=_btc_daily, legacy=True,
     )
     vix_val = parse_price(vix_price)
-    vix_risk, vix_color = assess_risk("VIX", vix_val)
+    vix_risk, vix_color = assess_risk("VIX", vix_val, vix_chg)
     vix_score_val = compute_vix_score(vix_val)
     # S-Risk: 위험심리 종합 (VIX + 신용 + 금급등 + 달러급등)
     _credit_dev = fetch_credit_dev_pct()
     s_risk_label, s_risk_color, s_risk_score = compute_s_risk_index(
-        vix_val, credit_dev_pct=_credit_dev, gold_chg=_gold_daily, dxy_chg=_dxy_daily,
+        vix_val, credit_dev_pct=_credit_dev, gold_chg=_gold_daily, dxy_chg=_dxy_daily, vix_chg=vix_chg,
     )
     macro_label, macro_color, macro_total_val, _ = compute_macro_composite(
         t_risk_score, fx_risk_score, c_risk_score, s_risk_score
@@ -1412,7 +1441,7 @@ def compute_krw_risk():
         return None, None, None, None
 
 
-def compute_kr_macro_risk(krw_risk_total, bond_3y_val, wti_val):
+def compute_kr_macro_risk(krw_risk_total, bond_3y_val, wti_val, wti_chg=None):
     """한국 매크로 종합 위험 지수 (KR-Macro Risk)
     환율(KRW-Risk) 40% + 금리 30% + 유가(WTI) 30%
     100점 환산: 환율×1.33 + 금리×1.0 + 유가×1.0
@@ -1441,7 +1470,7 @@ def compute_kr_macro_risk(krw_risk_total, bond_3y_val, wti_val):
     bond_score = label_to_score(bond_label)
     bond_display = bond_label
 
-    wti_label, wti_color = assess_risk("WTI", wti_val)
+    wti_label, wti_color = assess_risk("WTI", wti_val, wti_chg)
     wti_score = label_to_score(wti_label)
     wti_display = wti_label
 
@@ -2012,7 +2041,7 @@ def build_korea_sheet(target_date):
     # 환율 위험 (3축: 수준 + 독자약세 vs DXY + 엔/원 추세)
     krw_risk_label, krw_risk_color, krw_level, krw_rc = compute_krw_risk()
 
-    macro_label, macro_color, bond_risk, bond_rc, wti_risk, wti_rc = compute_kr_macro_risk(krw_risk_label, bond_3y_val, wti_val)
+    macro_label, macro_color, bond_risk, bond_rc, wti_risk, wti_rc = compute_kr_macro_risk(krw_risk_label, bond_3y_val, wti_val, wti_chg)
 
     # 시트 구성
     rows = []
