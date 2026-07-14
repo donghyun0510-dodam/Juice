@@ -574,8 +574,8 @@ def compute_s_risk_index(vix_val, credit_dev_pct=None, gold_chg=None, dxy_chg=No
       gold=금 급등(0~15, +1.7%초과, +4.5%만점), dollar=DXY 급등(0~15, +0.3%초과*18).
     금·달러는 '급변(모멘텀)'만 — 레벨은 C-Risk·FX-Risk가 소유(이중계상 방지).
     금 모멘텀 2026-06-16 재캘리브레이션(floor 1.0→1.7%≈1σ, cap 20→15) — 상세는 scouter_core.compute_s_risk.
-    VIX 급등 등급 플로어: vix_chg(일변동%)가 ≥+10%면 점수는 그대로 두고 라벨만 최소 '주의'로
-    격상하고 ⚡를 붙인다(변동성 점프 자체를 경보 — 점수 가산 아님, 대시보드 _floor_grade와 동일 방침).
+    VIX 급등 점수 가산: vix_chg(일변동%)가 ≥+10%면 급등폭 비례 가산(0~30, +10%초과*1.5, +30%서 만점)
+    + 급등 시 최소 주의(31점) 하한 보장. 점수 자체를 올려 타임시리즈·매크로 종합에도 반영(라벨 ⚡ 표식).
     반환: (label, color, total)."""
     GREEN = {"red": 0, "green": 0.6, "blue": 0}
     YELLOW = {"red": 0.8, "green": 0.8, "blue": 0}
@@ -596,8 +596,18 @@ def compute_s_risk_index(vix_val, credit_dev_pct=None, gold_chg=None, dxy_chg=No
     if d is not None:
         dollar = max(0.0, min(15.0, (d - 0.3) * 18))
 
-    total = min(100.0, base + credit + gold + dollar)
-    print(f"  S-Risk: VIX={base:.0f} 신용={credit:.0f} 금={gold:.0f} 달러={dollar:.0f} 종합={total:.0f}점")
+    # VIX 급등 가산: 일변동 ≥ +10%면 급등폭 비례(0~30) 가산 + 최소 주의(31) 하한
+    vix_spike = 0.0
+    vc = _chg(vix_chg)
+    spike_on = vc is not None and vc >= 10.0
+    if spike_on:
+        vix_spike = min(30.0, (vc - 10.0) * 1.5)
+
+    total = base + credit + gold + dollar + vix_spike
+    if spike_on:
+        total = max(total, 31.0)
+    total = min(100.0, total)
+    print(f"  S-Risk: VIX={base:.0f} 신용={credit:.0f} 금={gold:.0f} 달러={dollar:.0f} VIX급등={vix_spike:.0f} 종합={total:.0f}점")
 
     if total <= 30:
         label, color = f"안정({total:.0f}점)", GREEN
@@ -607,12 +617,7 @@ def compute_s_risk_index(vix_val, credit_dev_pct=None, gold_chg=None, dxy_chg=No
         label, color = f"위험({total:.0f}점)", ORANGE
     else:
         label, color = f"고위험({total:.0f}점)", RED
-
-    # VIX 급등 등급 플로어: 일변동 ≥ +10%면 점수(total)는 그대로, 라벨만 최소 주의로 격상 + ⚡
-    vc = _chg(vix_chg)
-    if vc is not None and vc >= 10.0:
-        if label.startswith("안정"):
-            label, color = f"주의({total:.0f}점)", YELLOW
+    if spike_on:
         label += " ⚡"
 
     return label, color, total

@@ -711,12 +711,14 @@ def fetch_credit_dev_pct(window=20):
         return None
 
 
-def compute_s_risk(vix_val, credit_dev_pct=None, gold_chg=None, dxy_chg=None):
-    """위험심리 종합 지수(S-Risk): VIX 베이스 + 신용·금·달러 가산, 100 캡.
+def compute_s_risk(vix_val, credit_dev_pct=None, gold_chg=None, dxy_chg=None, vix_chg=None):
+    """위험심리 종합 지수(S-Risk): VIX 베이스 + 신용·금·달러·VIX급등 가산, 100 캡.
       base=VIX_score(0~100), credit=HYG/IEF 추세이탈(0~25, dev−2.5%서 만점),
-      gold=금 급등(0~15, +1.7%초과, +4.5%만점), dollar=DXY 급등(0~15, +0.3%초과*18).
-    금·달러는 '급변(모멘텀)'만 — 레벨은 C-Risk·FX-Risk가 소유(이중계상 방지).
-    금 모멘텀 2026-06-16 재캘리브레이션(floor 1.0→1.7%≈1σ, cap 20→15) — 상세는 scouter_core.compute_s_risk."""
+      gold=금 급등(0~15, +1.7%초과, +4.5%만점), dollar=DXY 급등(0~15, +0.3%초과*18),
+      vix_spike=VIX 일변동 급등(0~30, +10%초과*1.5, +30%만점) + 급등 시 최소 주의(31) 하한.
+    금·달러·VIX급등은 '급변(모멘텀)'만 — 레벨은 C-Risk·FX-Risk·VIX base가 소유.
+    금 모멘텀 2026-06-16 재캘리브레이션(floor 1.0→1.7%≈1σ, cap 20→15) — 상세는 scouter_core.compute_s_risk.
+    VIX급등 가산 2026-07-14 추가 — 레벨 낮아도 변동성 점프 자체를 점수에 반영(3파일 동기)."""
     base = compute_vix_score(vix_val)
     credit = 0.0
     if credit_dev_pct is not None:
@@ -729,7 +731,15 @@ def compute_s_risk(vix_val, credit_dev_pct=None, gold_chg=None, dxy_chg=None):
     d = chg_num(dxy_chg)
     if d is not None:
         dollar = max(0.0, min(15.0, (d - 0.3) * 18))
-    return min(100.0, base + credit + gold + dollar)
+    vix_spike = 0.0
+    vc = chg_num(vix_chg)
+    spike_on = vc is not None and vc >= 10.0
+    if spike_on:
+        vix_spike = min(30.0, (vc - 10.0) * 1.5)
+    total = base + credit + gold + dollar + vix_spike
+    if spike_on:
+        total = max(total, 31.0)
+    return min(100.0, total)
 
 
 def risk_grade(score, thresholds=(25, 50, 75)):
@@ -973,6 +983,7 @@ def collect_all_data():
     f_copper_d = ex.submit(_yf_daily_pct, "HG=F")
     f_btc_d = ex.submit(_yf_daily_pct, "BTC-USD")
     f_dxy_d = ex.submit(_yf_daily_pct, "DX-Y.NYB")
+    f_vix_d = ex.submit(_yf_daily_pct, "^VIX")
     f_credit = ex.submit(fetch_credit_dev_pct)
     oil_chg_avg = avg_chg(f_wti_d.result(), f_brent_d.result())
     _gold_d = f_gold_d.result()
@@ -980,6 +991,7 @@ def collect_all_data():
     _copper_d = f_copper_d.result()
     _btc_d = f_btc_d.result()
     _dxy_d = f_dxy_d.result()
+    _vix_d = f_vix_d.result()
     _credit_dev = f_credit.result()
     # C-Risk 신규(순수 상품): 금 모멘텀·BTC 제외
     data["c_risk"], data["oil_avg"], data["gc_ratio"] = compute_c_risk(
@@ -997,7 +1009,7 @@ def collect_all_data():
     data["vix_score"] = compute_vix_score(data["vix"])
     data["credit_dev"] = _credit_dev
     data["s_risk"] = compute_s_risk(
-        data["vix"], credit_dev_pct=_credit_dev, gold_chg=_gold_d, dxy_chg=_dxy_d
+        data["vix"], credit_dev_pct=_credit_dev, gold_chg=_gold_d, dxy_chg=_dxy_d, vix_chg=_vix_d
     )
 
     data["macro_total"] = _weighted_macro([

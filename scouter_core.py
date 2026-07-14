@@ -689,15 +689,17 @@ def fetch_credit_dev_pct(window=20):
         return None
 
 
-def compute_s_risk(vix_val, credit_dev_pct=None, gold_chg=None, dxy_chg=None):
-    """위험심리 종합 지수(S-Risk): VIX 베이스 + 신용·금·달러 가산, 100 캡.
+def compute_s_risk(vix_val, credit_dev_pct=None, gold_chg=None, dxy_chg=None, vix_chg=None):
+    """위험심리 종합 지수(S-Risk): VIX 베이스 + 신용·금·달러·VIX급등 가산, 100 캡.
       base   = VIX_score (0~100)
       credit = HYG/IEF 20일 SMA 대비 하락 이탈 (0~25, dev −2.5%서 만점)
       gold   = 금 일변동 상승분 (0~15, +1.7%(≈1σ) 초과, +4.5%서 만점) — 안전자산 쏠림
       dollar = DXY 일변동 상승분 (0~15, +0.3% 초과 *18, +1.13%서 만점) — 달러 도피
-    금·달러는 '레벨'이 아닌 '급변(모멘텀)'만 반영 — 레벨은 각각 C-Risk·FX-Risk가 소유(이중계상 방지).
+      vix_spike = VIX 일변동 급등 (0~30, +10% 초과 *1.5, +30%서 만점) + 급등 시 최소 주의(31) 하한
+    금·달러·VIX급등은 '레벨'이 아닌 '급변(모멘텀)'만 반영 — VIX 레벨은 base가 소유(이중계상은 급등 축이 달라 허용).
     금 모멘텀: 2026-06-16 재캘리브레이션 — 구공식(floor 1.0%/cap 20/기울기 8)은 금 σ≈1.7% 레짐에서
-    4일 중 1일 점등(False Positive 多)·VIX 베이스와 동급 → floor를 1σ로 올리고 cap을 15로 낮춰 꼬리사건화."""
+    4일 중 1일 점등(False Positive 多)·VIX 베이스와 동급 → floor를 1σ로 올리고 cap을 15로 낮춰 꼬리사건화.
+    VIX급등 가산: 2026-07-14 추가 — 레벨 낮아도 변동성 점프 자체를 점수에 반영(daily_review·대시보드 동기)."""
     base = compute_vix_score(vix_val)
 
     credit = 0.0
@@ -714,7 +716,16 @@ def compute_s_risk(vix_val, credit_dev_pct=None, gold_chg=None, dxy_chg=None):
     if d is not None:
         dollar = max(0.0, min(15.0, (d - 0.3) * 18))
 
-    return min(100.0, base + credit + gold + dollar)
+    vix_spike = 0.0
+    vc = chg_num(vix_chg)
+    spike_on = vc is not None and vc >= 10.0
+    if spike_on:
+        vix_spike = min(30.0, (vc - 10.0) * 1.5)
+
+    total = base + credit + gold + dollar + vix_spike
+    if spike_on:
+        total = max(total, 31.0)
+    return min(100.0, total)
 
 
 def _compute_yesterday_baseline():
@@ -821,6 +832,7 @@ def collect_macro_scores(settled=False) -> dict:
     btc_daily = f_btc_d.result()
     oil_chg_avg = avg_chg(wti_daily, brent_daily)
     dxy_daily = _yf_daily_pct("DX-Y.NYB")
+    vix_daily = _yf_daily_pct("^VIX", settled)  # VIX 일변동 — S-Risk 급등 가산 입력
     credit_dev = fetch_credit_dev_pct()
     _, t_risk, _ = compute_t_risk(y2, y10, y30)
     fx_risk = compute_fx_risk(dxy, jpy, cny)
@@ -837,7 +849,7 @@ def collect_macro_scores(settled=False) -> dict:
         legacy=True,
     )
     vix_score = compute_vix_score(vix)
-    s_risk = compute_s_risk(vix, credit_dev_pct=credit_dev, gold_chg=gold_daily, dxy_chg=dxy_daily)
+    s_risk = compute_s_risk(vix, credit_dev_pct=credit_dev, gold_chg=gold_daily, dxy_chg=dxy_daily, vix_chg=vix_daily)
     macro_total = _weighted_macro([
         (t_risk, 0.30), (fx_risk, 0.25), (c_risk, 0.25), (s_risk, 0.20)])
     macro_total_legacy = _weighted_macro([
@@ -853,7 +865,7 @@ def collect_macro_scores(settled=False) -> dict:
         "c_risk_legacy": c_risk_legacy,
         "macro_total_legacy": macro_total_legacy,
         # 디버그·참조용
-        "credit_dev": credit_dev, "dxy_chg_daily": dxy_daily,
+        "credit_dev": credit_dev, "dxy_chg_daily": dxy_daily, "vix_chg": vix_daily,
         "y2": y2, "y10": y10, "y30": y30,
         "dxy": dxy, "jpy": jpy, "cny": cny,
         "wti": wti, "brent": brent, "gold": gold, "copper": copper, "silver": silver,
