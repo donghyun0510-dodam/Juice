@@ -286,11 +286,19 @@ def _yf_commodity(ticker_symbol):
 
 
 def get_copper_investing():
-    # yfinance HG=F ($/lb) × 2204.62 → $/톤. yfinance 실패 시 investing.com($/lb) 폴백.
-    y = _yf_commodity("HG=F")
-    if y[2] is not None:
-        ton = y[2] * 2204.62
-        return f"{ton:,.0f}", y[1], ton
+    # 구리 '현물'(네이버 CMCU0, USD/TONNE) 1차 — 네이버증권 표시값과 일치(환산 불필요).
+    # 폴백: yfinance HG=F(선물 $/lb)·investing.com($/lb)를 ×2204.62해 $/톤 근사.
+    nval, nchg, _ = naver_quote_for_ticker("HG=F")  # COPPER→CMCU0 ($/톤)
+    if nval is not None:
+        return f"{nval:,.0f}", nchg, nval
+    try:
+        h = yf.Ticker("HG=F").history(period="10d")["Close"].dropna()
+        if len(h) >= 2:
+            last = float(h.iloc[-1]) * 2204.62
+            prev = float(h.iloc[-2]) * 2204.62
+            return f"{last:,.0f}", f"{(last - prev) / prev * 100:+.2f}%", last
+    except Exception:
+        pass
     s = _scrape_investing("https://kr.investing.com/commodities/copper?cid=959211")
     if s[2] is not None:
         ton = s[2] * 2204.62
@@ -1722,7 +1730,7 @@ with st.expander(_c_label):
     for label, key, val, fmt, chg in [
         (_tt("Brent Crude", "BZ=F", _com_src, "브렌트유 선물"),         "BRN", d["brent"],      "${:.2f}",      d.get("brent_chg")),
         (_tt("WTI Crude",   "CL=F", _com_src, "서부 텍사스산 원유 선물"), "WTI", d["wti"],        "${:.2f}",      d.get("wti_chg")),
-        (_tt("Copper",      "HG=F × 2204.62", _com_src, "구리 선물 ($/톤)"), None, d["copper"], "${:,.0f}/톤",  d.get("copper_chg")),
+        (_tt("Copper",      "네이버 CMCU0", "네이버 현물", "구리 현물 ($/톤)"), None, d["copper"], "${:,.0f}/톤",  d.get("copper_chg")),
         (_tt("Silver",      "SI=F", _com_src, "은 선물"),                None,  d.get("silver"), "${:.2f}",      d.get("silver_chg")),
     ]:
         if val is not None:

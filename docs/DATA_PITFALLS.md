@@ -94,7 +94,44 @@ yfinance 일봉 인덱스가 폴백이다.
 
 ---
 
-## 4. KR 개별종목 stale 바
+## 4. FX(fxlist)도 마감 후 배치는 `settled=True` — 라이브는 장중 스냅샷
+
+### 규칙
+글로벌 매크로 환율(DXY·EUR/USD·USD/KRW)도 마감 후 배치는 `settled=True`로 읽는다.
+`daily_review`의 `get_price_and_change("EURUSD=X", settled=True)` 등. USD/JPY·USD/CNY는
+원래 `worldDailyQuote` 일별 종가(fxdesk)라 무관.
+
+### 왜 (2026-07-15 사고)
+`fxlist`(네이버 `marketindex/exchange`)는 **라이브 호가**다. daily-global은 06:37 KST(=미 마감
+후)에 도는데, 그 시각 FX는 이미 다음 세션 장중값이다. DXY·USD/JPY는 우연히 일별 종가와 근접해
+맞았지만 **EUR/USD만 장중값(1.138, -0.30%)이 박혀 실제 07-14 종가(1.1444, +0.37%)와 부호까지 반전**됐다.
+
+### 픽스
+`naver_quote(key, settled=True)`가 `fxlist`도 `exchange/{code}/prices` 일별 정산 바를 먼저 읽고,
+이 경로가 비는 크로스(EURUSD)는 `worldDailyQuote(FX_EURUSD)` 일별 종가로 폴백하도록 확장.
+(`.DXY`·`FX_USDKRW`는 `/prices` 있음, `EURUSD`는 없음 — 소스마다 제각각이라 둘 다 시도.)
+
+---
+
+## 5. 구리는 '현물'(CMCU0) — '선물'(HGcv1) 아님
+
+### 규칙
+구리 표시·C-Risk 입력은 네이버 **구리 현물(`CMCU0`, USD/TONNE)**를 쓴다.
+`naver_macro._DISPATCH["COPPER"] = ("metals", "CMCU0")`. 이미 $/톤이라 **환산(×2204.62) 불필요**.
+
+### 왜 (2026-07-15 사고)
+네이버 metals에는 구리가 둘 있다 — `HGcv1`=**구리(선물)** $/lb, `CMCU0`=**구리(현물)** $/tonne.
+옛 코드는 선물($/lb)을 ×2204.62해 $/톤을 **합성**했는데(1 metric tonne=2204.62 lb, 옛 주석의
+"short ton"은 오기), 현물과 ~3% 어긋났다(합성 14,061 vs 현물 13,596). 사용자가 네이버증권에서 보는
+값은 현물이라 안 맞았다. 폴백(yfinance HG=F 선물·investing)만 ×2204.62로 $/톤 근사 유지.
+
+### 주의 (3파일 동기)
+`get_copper_investing`는 `daily_review`·`scouter_core`·`market_dashboard` 3곳에 있다. G/C 비율
+캘리브레이션(gold/copper)은 $/톤 기준 그대로라 현물 전환 영향 미미(~3%, 현 레벨에선 점수 동일).
+
+---
+
+## 6. KR 개별종목 stale 바
 
 yfinance가 KRX 당일 일봉을 늦게 게시하는 종목(에스엠·JYP·CJ ENM·알테오젠 등)은 등락률이
 전일 값으로 남아 `⚠MM/DD` stale 마킹된다. 급등한 종목에 Short/Sell Sign이 뜨면 stale을 의심할 것.

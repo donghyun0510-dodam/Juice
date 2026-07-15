@@ -367,9 +367,20 @@ def _yf_commodity_2f(ticker, multiplier=1.0, fmt="{:,.2f}"):
 
 
 def get_copper_investing():
-    # HG=F는 $/lb → $/톤 환산 (1 short ton = 2204.62 lb)
-    r = _yf_commodity_2f("HG=F", multiplier=2204.62, fmt="{:,.0f}")
-    if r[2] is not None: return r
+    """구리 '현물'(LME) $/톤. 네이버 CMCU0(정산 일별 바) 1차 — 네이버증권 표시값과 일치.
+    폴백: yfinance HG=F(구리 선물, $/lb)×2204.62로 $/톤 근사(1 metric tonne=2204.62 lb)."""
+    nval, nchg, _ = naver_quote_for_ticker("HG=F", settled=True)  # COPPER→CMCU0 ($/톤)
+    if nval is not None:
+        return f"{nval:,.0f}", nchg, nval
+    # 폴백: yfinance HG=F(선물 $/lb)만 사용해 톤 환산 — 네이버 재시도 없이(현물×2204.62 방지)
+    try:
+        h = yf.Ticker("HG=F").history(period="10d")["Close"].dropna()
+        if len(h) >= 2:
+            last = float(h.iloc[-1]) * 2204.62
+            prev = float(h.iloc[-2]) * 2204.62
+            return f"{last:,.0f}", f"{(last - prev) / prev * 100:+.2f}%", last
+    except Exception:
+        pass
     return _scrape_investing("https://kr.investing.com/commodities/copper?cid=959211")
 
 
@@ -840,11 +851,13 @@ def build_global_sheet(target_date):
     bond_10y, bond_10y_chg, _ = get_yield_live("10Y", "^TNX")
     bond_30y, bond_30y_chg, _ = get_yield_live("30Y", "^TYX")
 
-    # 매크로 - 환율
-    dxy, dxy_chg = get_price_and_change("DX-Y.NYB")
-    eur_usd, eur_usd_chg = get_price_and_change("EURUSD=X")
-    usd_jpy, usd_jpy_chg = get_price_and_change("JPY=X")
-    usd_cny, usd_cny_chg = get_price_and_change("CNY=X")
+    # 매크로 - 환율 — 마감 후 배치라 직전 세션 종가 필요 → settled(일별 정산 바).
+    # 라이브 fxlist는 실행 시각(06:37 KST)에 이미 다음 세션 장중값이라 EUR/USD가
+    # 틀어졌던 사례 방지. USD/JPY·USD/CNY는 원래 worldDailyQuote 일별 종가.
+    dxy, dxy_chg = get_price_and_change("DX-Y.NYB", settled=True)
+    eur_usd, eur_usd_chg = get_price_and_change("EURUSD=X", settled=True)
+    usd_jpy, usd_jpy_chg = get_price_and_change("JPY=X", settled=True)
+    usd_cny, usd_cny_chg = get_price_and_change("CNY=X", settled=True)
 
     # 매크로 - 원자재 — 네이버 정산 일별 바(직전 세션 종가) 1차, 실패 시 investing.com
     brent, brent_chg = get_price_and_change("BZ=F", settled=True)

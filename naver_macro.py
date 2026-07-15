@@ -53,7 +53,10 @@ _DISPATCH = {
     "WTI":    ("energy", "CLcv1"),
     "BRENT":  ("energy", "LCOcv1"),
     "GOLD":   ("metals", "GCcv1"),
-    "COPPER": ("metals", "HGcv1"),   # $/lb (호출부에서 필요시 ×2204.62 → $/톤)
+    # 구리는 '현물'(CMCU0, USD/TONNE) — 네이버증권에 보이는 구리 값과 일치. 예전엔
+    # 선물(HGcv1, $/lb)을 ×2204.62해 $/톤을 합성했는데 현물과 ~3% 어긋났다(선물 14,061
+    # vs 현물 13,596). 호출부(get_copper_investing)는 이제 ×2204.62 없이 그대로 쓴다.
+    "COPPER": ("metals", "CMCU0"),   # $/tonne (현물, 환산 불필요)
     "SILVER": ("metals", "SIcv1"),
     "VIX":    ("index",  ".VIX"),
 }
@@ -194,7 +197,11 @@ def naver_quote(key, settled=False):
     settled=True면 원자재(energy/metals)·채권은 라이브를 건너뛰고 /prices 최신 정산 바만
     쓴다. 라이브는 재개장 직후 '다음 세션'의 몇 분치 등락률을 주므로, 마감 후 배치가
     직전 세션 종가를 원할 때는 시각과 무관하게 정산 바가 유일하게 맞는 값이다.
-    (FX/지수는 /prices 경로가 없어 settled를 무시하고 라이브를 그대로 반환.)
+    FX(fxlist: DXY·EURUSD·USDKRW)도 settled=True면 exchange/{code}/prices 일별 정산 바
+    (없으면 worldDailyQuote 일별 종가)로 대체 — 라이브는 마감 후 배치 시각에 이미 다음
+    세션으로 넘어간 장중 스냅샷이라 직전 세션 종가와 어긋난다(EURUSD 사례).
+    fxdesk(USD/JPY·USD/CNY)는 원래 worldDailyQuote 일별 종가라 settled와 무관.
+    (지수는 /prices 경로가 없어 settled를 무시하고 라이브를 그대로 반환.)
     """
     spec = _DISPATCH.get(key)
     if not spec:
@@ -232,6 +239,18 @@ def naver_quote(key, settled=False):
                 return live
             return _prices_latest("energy", code)  # PREOPEN → 전일 종가 일별 바
         if strat == "fxlist":
+            if settled:
+                # 마감 후 배치: 라이브 호가(장중 스냅샷) 대신 일별 정산 종가.
+                # .DXY·FX_USDKRW는 exchange/{code}/prices 일별 바가 있고, EURUSD는
+                # 이 경로가 비어 worldDailyQuote(FX_EURUSD) 일별 종가로 폴백한다.
+                d = _prices_latest("exchange", code)
+                if d[0] is not None:
+                    return d
+                desk_code = code if code.startswith("FX_") else "FX_" + code.lstrip(".")
+                d = _fetch_desk_fx(desk_code)
+                if d[0] is not None:
+                    return d
+                # 둘 다 실패 → 라이브로 폴백(아래 공통 경로)
             return _from_item(_find_in_lists(_get_json(f"{_API}/marketindex/exchange"), code))
         if strat == "fxdesk":
             return _fetch_desk_fx(code)

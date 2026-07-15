@@ -246,11 +246,20 @@ def _yf_commodity(ticker_symbol, settled=False):
 
 
 def get_copper_investing(settled=False):
-    # HG=F ($/lb) × 2204.62 → $/톤. 실패 시 investing.com($/lb) 폴백.
-    y = _yf_commodity("HG=F", settled=settled)
-    if y[2] is not None:
-        ton = y[2] * 2204.62
-        return f"{ton:,.0f}", y[1], ton
+    # 구리 '현물'(네이버 CMCU0, USD/TONNE) 1차 — 네이버증권 표시값과 일치(환산 불필요).
+    # 폴백: yfinance HG=F(선물 $/lb)·investing.com($/lb)를 ×2204.62해 $/톤 근사.
+    nval, nchg, _ = naver_quote_for_ticker("HG=F", settled=settled)  # COPPER→CMCU0 ($/톤)
+    if nval is not None:
+        return f"{nval:,.0f}", nchg, nval
+    # 폴백: yfinance HG=F(선물 $/lb)만 사용해 톤 환산 — 네이버 재시도 없이(현물×2204.62 방지).
+    try:
+        h = yf.Ticker("HG=F").history(period="10d")["Close"].dropna()
+        if len(h) >= 2:
+            last = float(h.iloc[-1]) * 2204.62
+            prev = float(h.iloc[-2]) * 2204.62
+            return f"{last:,.0f}", f"{(last - prev) / prev * 100:+.2f}%", last
+    except Exception:
+        pass
     s = _scrape_investing("https://kr.investing.com/commodities/copper?cid=959211")
     if s[2] is not None:
         ton = s[2] * 2204.62
