@@ -136,3 +136,49 @@ yfinance 일봉 인덱스가 폴백이다.
 yfinance가 KRX 당일 일봉을 늦게 게시하는 종목(에스엠·JYP·CJ ENM·알테오젠 등)은 등락률이
 전일 값으로 남아 `⚠MM/DD` stale 마킹된다. 급등한 종목에 Short/Sell Sign이 뜨면 stale을 의심할 것.
 보정은 `naver_kr_stock(6자리코드)`. 자세한 건 `CLAUDE.md`의 국장 시트 절.
+
+---
+
+## 7. USD/JPY·USD/CNY는 마감 후 배치에서 네이버 데스크(worldDailyQuote)를 쓰면 안 된다
+
+### 규칙
+`daily_review`의 USD/JPY·USD/CNY는 **yfinance(JPY=X·CNY=X)의 target_date NY-종가 바**를
+1차로 쓴다(`_fx_ny_close(ticker, target_date)`). 네이버 데스크는 라이브 폴백으로만.
+
+### 왜 (2026-07-15 재발)
+네이버 데스크톱 `worldDailyQuote`(fxdesk)는 **아시아-세션 클럭**이라, NY 종가 기준인 시트의
+나머지(DXY·지수·금리)와 부호까지 어긋난다:
+
+| 대상일 | 지표 | 데스크(아시아 클럭) | NY 종가(진실) |
+|---|---|---|---|
+| 7/15 | USD/JPY | 162.14 / **+0.11%** | 162.19 / **-0.15%** |
+
+DATA_PITFALLS 항목4(fxlist EURUSD 라이브)를 고칠 때 fxdesk는 "원래 일별 종가라 무관"이라고
+넘겼는데, **그 '일별 종가'가 NY가 아닌 아시아 마감**이라는 게 함정이었다. 이제 `naver_quote`의
+fxdesk 분기는 `settled=True`면 `None`을 반환하고, 호출부가 yfinance NY-종가로 폴백한다.
+
+### 주의 — target_date 고정
+`_fx_ny_close`는 yfinance 일별 바에서 **target_date 바를 명시적으로 선택**한다. 단순 last-2는
+FX가 24h 거래라 재실행 시각에 따라 *다음날 바*를 물어와(백필 때 07-15 대신 07-16) 어긋난다.
+
+---
+
+## 8. 구리 현물(CMCU0)은 `/prices` 일별 바가 아니라 라이브가 정산값 — 게시 지연 주의
+
+### 규칙
+`settled=True`에서도 **구리 현물(CMCU0)만은 라이브 아이템을 정산값으로 쓴다**
+(`naver_macro._SPOT_METALS`). 라이브·일별 바 중 `localTradedAt`이 늦은 쪽 선택.
+선물(GOLD/SILVER/WTI/BRENT)은 반대로 라이브가 '다음 세션'이라 `/prices` 일별 바가 맞다.
+
+### 왜 (2026-07-15 재발)
+CMCU0는 **LME 캐시(현물)** — 라이브 아이템이 `marketStatus=null`, `localTradedAt`=런던 캐시
+픽싱으로 이미 당일 정산값이다. 그런데 `/prices` **일별 바는 게시가 수 시간 지연**돼, 배치
+실행 시각(≈18:37 ET)에 아직 D-1 바만 올라와 있을 때가 있다. 옛 코드는 `settled=True`가
+`/prices` 최신 바를 무조건 반환해, **07-14 바(13,596/+0.80%)가 시트에 조용히 박혔다**(실제
+07-15 현물 -0.45%). 선물(GC/SI/CL cv1)은 같은 시각 라이브가 `marketStatus=OPEN`(다음 세션)
+이라 반대로 `/prices`가 맞다 — **현물/선물이 라이브 신선도가 정반대**인 게 핵심.
+
+### 검증
+`naver_settled_date("COPPER")`도 현물은 라이브 날짜를 반영하도록 맞췄다. `daily_review`는
+각 원자재 정산 바 거래일을 **target_date와 비교**해(서로 비교가 아님 — '전부 하루 밀림'도 잡음)
+어긋나면 이름을 찍어 경고한다.

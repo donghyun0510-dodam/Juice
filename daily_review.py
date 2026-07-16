@@ -240,6 +240,38 @@ def get_price_and_change(ticker_symbol, settled=False):
         return "", ""
 
 
+def _fx_ny_close(ticker, target_date):
+    """FX 크로스(JPY=X·CNY=X)의 target_date 세션 NY 종가·등락률 → (price_str, chg_str).
+
+    네이버 worldDailyQuote는 아시아-세션 클럭이라 NY 종가 기준 시트와 부호가 어긋난다
+    (2026-07-15 USD/JPY 사고). 마감 후 배치는 yfinance 일별 바에서 **target_date 바를
+    명시적으로 선택**한다 — last-2 방식은 재실행 시각에 따라 다음날 바를 물어와 어긋난다.
+    실패 시 ('','')로 반환해 호출부가 네이버 데스크(라이브)로 폴백하게 한다.
+    """
+    tgt = target_date.date() if hasattr(target_date, "date") else target_date
+    try:
+        h = yf.Ticker(ticker).history(period="10d")["Close"].dropna()
+        if len(h) < 2:
+            return "", ""
+        dates = [d.date() for d in h.index]
+        if tgt in dates:
+            i = dates.index(tgt)
+        elif dates[-1] < tgt:
+            i = len(dates) - 1   # target 바 미게시 → 최신 완결 바
+        else:
+            return "", ""
+        if i < 1:
+            return "", ""
+        last, prev = float(h.iloc[i]), float(h.iloc[i - 1])
+        if prev <= 0:
+            return "", ""
+        pct = (last - prev) / prev * 100
+        price_str = f"{last:.2f}" if last >= 100 else f"{last:.3f}"
+        return price_str, f"{pct:+.2f}%"
+    except Exception:
+        return "", ""
+
+
 def _yf_daily_pct(ticker):
     """최근 2개 일봉 종가 간 %변동. compute_c_risk_index 모멘텀 입력 전용 — 실시간
     티커의 슬라이딩 1-day %change와 달리 세션 휴지기에도 값이 고정(주말 Fri settle 유지).
@@ -853,11 +885,17 @@ def build_global_sheet(target_date):
 
     # 매크로 - 환율 — 마감 후 배치라 직전 세션 종가 필요 → settled(일별 정산 바).
     # 라이브 fxlist는 실행 시각(06:37 KST)에 이미 다음 세션 장중값이라 EUR/USD가
-    # 틀어졌던 사례 방지. USD/JPY·USD/CNY는 원래 worldDailyQuote 일별 종가.
+    # 틀어졌던 사례 방지. USD/JPY·USD/CNY는 네이버 worldDailyQuote가 아시아-세션
+    # 클럭이라 NY 종가 시트와 부호가 어긋나(2026-07-15 사고) → yfinance target_date
+    # NY-종가 바 1차, 실패 시 네이버 데스크(라이브) 폴백.
     dxy, dxy_chg = get_price_and_change("DX-Y.NYB", settled=True)
     eur_usd, eur_usd_chg = get_price_and_change("EURUSD=X", settled=True)
-    usd_jpy, usd_jpy_chg = get_price_and_change("JPY=X", settled=True)
-    usd_cny, usd_cny_chg = get_price_and_change("CNY=X", settled=True)
+    usd_jpy, usd_jpy_chg = _fx_ny_close("JPY=X", target_date)
+    if not usd_jpy:
+        usd_jpy, usd_jpy_chg = get_price_and_change("JPY=X")   # 데스크 라이브 폴백
+    usd_cny, usd_cny_chg = _fx_ny_close("CNY=X", target_date)
+    if not usd_cny:
+        usd_cny, usd_cny_chg = get_price_and_change("CNY=X")
 
     # 매크로 - 원자재 — 네이버 정산 일별 바(직전 세션 종가) 1차, 실패 시 investing.com
     brent, brent_chg = get_price_and_change("BZ=F", settled=True)
@@ -868,8 +906,14 @@ def build_global_sheet(target_date):
     copper, copper_chg, copper_val = get_copper_investing()
     _bar_dates = {k: naver_settled_date(k) for k in ("WTI", "BRENT", "GOLD", "SILVER", "COPPER")}
     print(f"    정산 바 거래일: {_bar_dates}")
-    if len(set(d for d in _bar_dates.values() if d)) > 1:
-        print("    ⚠️ 원자재 정산 바 거래일이 서로 다름 — 일부 지표가 직전 세션이 아닐 수 있음")
+    # 각 원자재 정산 바가 대상 세션(target_date)인지 검증. 서로 비교가 아니라
+    # target과 비교해야 '전부 하루 밀림'도 잡는다. 밀린 지표는 이름을 찍어 경고
+    # (2026-07-15 COPPER가 D-1 바로 조용히 박힌 사고 재발 방지).
+    _tgt = target_date.strftime("%Y-%m-%d")
+    _stale = [k for k, d in _bar_dates.items() if d and d < _tgt]
+    if _stale:
+        print(f"    ⚠️ 원자재 정산 바가 대상일({_tgt})보다 이전 — 전일 값일 수 있음: "
+              f"{ {k: _bar_dates[k] for k in _stale} }")
 
     # 위험 심리 — VIX는 현물가 우선, 실패 시 선물
     vix_price, vix_chg = get_price_and_change("^VIX")
