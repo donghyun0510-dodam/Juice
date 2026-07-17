@@ -15,14 +15,12 @@
       [[지표명, "실제 ▲", "예상: X / 이전: Y"], ...]
 """
 import argparse
-import io
 import json
-import sys
 from datetime import datetime
 
-if hasattr(sys.stdout, "buffer"):
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
-
+# stdout UTF-8 래핑은 daily_review가 import 시 수행한다. 여기서 먼저 감싸면 daily_review가
+# 그 wrapper의 .buffer를 다시 감싸고, 원래 wrapper가 GC되며 버퍼를 닫아버린다
+# (ValueError: I/O operation on closed file). 래핑하지 말 것.
 from daily_review import build_economic_indicators
 
 
