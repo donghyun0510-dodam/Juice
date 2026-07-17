@@ -95,12 +95,29 @@ def build_economic_indicators(target_date, country="US"):
         "timeZone": "88",
     }
 
+    # Cloudflare 403은 **간헐적**이다(최근 12영업일 중 3회: 7/9·7/13·7/16). 한 번 맞고 포기하면
+    # 그날 경제지표가 통째로 '발표 없음'으로 조용히 기록된다 — 재시도로 뚫는다.
+    # 403 시 스크레이퍼를 폐기·재생성해야 clearance 쿠키를 새로 받는다(재사용하면 계속 403).
+    global _CAL_SCRAPER
+    resp = None
+    for attempt in range(4):
+        try:
+            scraper = _get_calendar_scraper()
+            r = scraper.post(url, headers=headers, data=payload, timeout=30)
+            if r.status_code == 200:
+                resp = r
+                break
+            print(f"    경제지표 HTTP {r.status_code} — 재시도 {attempt + 1}/4")
+        except Exception as e:
+            print(f"    경제지표 요청 오류 ({type(e).__name__}) — 재시도 {attempt + 1}/4")
+        _CAL_SCRAPER = None          # 챌린지 쿠키 폐기 후 새 세션으로 재획득
+        time.sleep(5 * (attempt + 1))
+
+    if resp is None:
+        print(f"    ⚠️ 경제지표 수집 실패 (4회 재시도 모두 실패) — '발표 없음'과 구분 필요 (재확인 요망)")
+        return []
+
     try:
-        scraper = _get_calendar_scraper()
-        resp = scraper.post(url, headers=headers, data=payload, timeout=30)
-        if resp.status_code != 200:
-            print(f"    ⚠️ 경제지표 수집 실패 (HTTP {resp.status_code}) — '발표 없음'과 구분 필요 (재확인 요망)")
-            return []
         data = resp.json()
         html = data.get("data", "")
         if not html:
@@ -108,7 +125,7 @@ def build_economic_indicators(target_date, country="US"):
             print(f"    ⚠️ 경제지표 응답 비어 있음 (data 필드 empty) — '발표 없음'과 구분 필요 (재확인 요망)")
             return []
     except Exception as e:
-        print(f"    ⚠️ 경제지표 수집 실패 ({type(e).__name__}: {e}) — '발표 없음'과 구분 필요 (재확인 요망)")
+        print(f"    ⚠️ 경제지표 파싱 실패 ({type(e).__name__}: {e}) — '발표 없음'과 구분 필요 (재확인 요망)")
         return []
 
     soup = BeautifulSoup(html, "html.parser")

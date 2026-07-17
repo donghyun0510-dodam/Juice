@@ -1,0 +1,37 @@
+name: Econ Refetch (manual)
+
+# investing.com 캘린더 Cloudflare 403으로 '2.경제 지표'가 '(발표 없음)'으로 잘못 기록된 날,
+# 러너 IP에서 재수집해 로그로 출력한다(시트는 쓰지 않음 — 값 확인 후 수동 기록).
+# 로컬(한국 가정 IP)은 상시 403이라 여기서 돌려야 한다. 자세한 건 econ_refetch.py 참조.
+
+on:
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "대상일 YYYY-MM-DD (발표일 기준)"
+        required: true
+      country:
+        description: "국가"
+        required: false
+        default: "US"
+        type: choice
+        options: ["US", "KR", "CN", "JP"]
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    env:
+      TZ: Asia/Seoul
+      GOOGLE_OAUTH_TOKEN_B64: ${{ secrets.GOOGLE_OAUTH_TOKEN_B64 }}
+      GOOGLE_SA_JSON: ${{ secrets.GOOGLE_SA_JSON }}
+      GSHEET_FOLDER_ID: ${{ secrets.GSHEET_FOLDER_ID }}
+      RULES_DEPLOY_KEY: ${{ secrets.RULES_DEPLOY_KEY }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup
+
+      - name: Refetch economic indicators
+        run: python econ_refetch.py "${{ inputs.date }}" --country "${{ inputs.country }}"
