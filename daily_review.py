@@ -907,6 +907,14 @@ def build_global_sheet(target_date):
     # NY-종가 바 1차, 실패 시 네이버 데스크(라이브) 폴백.
     dxy, dxy_chg = get_price_and_change("DX-Y.NYB", settled=True)
     eur_usd, eur_usd_chg = get_price_and_change("EURUSD=X", settled=True)
+    # 원자재와 같은 사고가 FX에도 난다: 네이버 일별 바 게시가 늦으면 D-1 바가 조용히
+    # 박힌다(2026-07-18 DXY 100.76/+0.28% = 07-16 바). 대상일과 대조해 경고.
+    _fx_bar_dates = {k: naver_settled_date(k) for k in ("DXY", "EURUSD")}
+    _fx_stale = {k: d for k, d in _fx_bar_dates.items()
+                 if d and d < target_date.strftime("%Y-%m-%d")}
+    if _fx_stale:
+        print(f"    ⚠️ FX 정산 바가 대상일({target_date:%Y-%m-%d})보다 이전 — "
+              f"전일 값일 수 있음: {_fx_stale}")
     usd_jpy, usd_jpy_chg = _fx_ny_close("JPY=X", target_date)
     if not usd_jpy:
         usd_jpy, usd_jpy_chg = get_price_and_change("JPY=X")   # 데스크 라이브 폴백

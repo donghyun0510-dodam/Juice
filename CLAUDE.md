@@ -35,6 +35,8 @@ python daily_review.py
 - 금리·환율·원자재·VIX·금은 **네이버 모바일 API(api.stock.naver.com) 1차 + yfinance/CNBC/investing 폴백**으로 일원화(`naver_quote`/`naver_quote_for_ticker`). 비공식 API라 항상 폴백을 단다.
 - **비트코인은 제외** — 네이버는 업비트/빗썸 원화(KRW)만 있고 USD가 없어 `BTC-USD`(yfinance) 유지. `TICKER_KEY`에 BTC 매핑 없음.
 - 엔드포인트: 채권 `marketindex/bond/US{2,10,30}YT=RR`, FX는 `marketindex/exchange`(DXY=`.DXY`/EURUSD) + 데스크톱 `worldDailyQuote`(USD/JPY·USD/CNY), 원자재 `marketindex/{energy,metals}/...`, VIX `index/.VIX/basic`.
+- ⚠ **일별 바(`/prices`) 카테고리는 라이브와 다를 수 있다** — `.DXY`·`FX_USDKRW`는 `exchange`, `EURUSD`는 `exchangeWorld`. 틀린 카테고리는 404가 아니라 **빈 배열**을 돌려줘 조용히 폴백으로 샌다(`_FX_PRICES_CATS`가 source of truth, `DATA_PITFALLS.md` 항목 9).
+- **정산 바 게시 지연 백필**: 배치 시각에 아직 D-1 바만 있던 지표(LME 현물 구리 상습)는 `settled_backfill.py`가 몇 시간 뒤 재확인해 시트 셀만 패치한다(멱등, `DATA_PITFALLS.md` 항목 10).
 - **`settled=True` (마감 후 배치 필수)**: `naver_quote(key, settled=True)`는 라이브 호가를 건너뛰고 `/prices` **정산 일별 바**만 쓴다. 라이브는 18:00 ET 재개장 뒤 *다음 세션*의 몇 분치 등락률을 주므로, 직전 세션 종가가 필요한 `daily_review`(원자재·금·브렌트, `_yf_daily_pct`)와 `scouter_logger`(`collect_macro_scores(settled=True)`)는 반드시 이 경로를 쓴다. 대시보드(장중)는 기본 라이브.
 - **PREOPEN 가드**(보조): 정비 휴장(17:00~18:00 ET) 중엔 등락률이 0으로 리셋 → `marketStatus=PREOPEN` 감지 시 일별 바로 대체. 단 **휴장 구간에서만 발동**하므로 마감 후 배치의 정확성을 이것에 기대면 안 된다(GH Actions cron이 1시간가량 지연돼 실제 실행은 18:35~18:52 ET = 재개장 후). 2026-06-23~07-09 금·은·구리·WTI가 이 이유로 매일 야간세션 값을 기록했음.
 - 적용 파일(중복 정의 동기): `daily_review.py`(증시리뷰), `scouter_core.py`(스카우터 코어 — `scouter_logger`·대시보드 공유), `market_dashboard.py`. `get_yield_live`/`get_price_and_change`/`_yf_daily_pct`/`_yf_commodity_2f`에 주입.
@@ -91,6 +93,7 @@ python daily_review.py
 | `long-scan-korea.yml` | Long Scan - Korea | `15 7 * * 1-5` | 월~금 16:15 (국장 종가 후) | `python long_scan.py --market korea` |
 | `monthly-input-reminder.yml` | Monthly Input Reminder | `0 11 27 * *` | 매월 27일 20:00 (정산 D-2h) | `python monthly_input_reminder.py` |
 | `monthly-stock-returns.yml` | Monthly Stock Returns | `0 13 27 * *` | 매월 27일 22:00 | `python monthly_stock_returns.py` |
+| `settled-backfill.yml` | Settled Bar Backfill - Global | `30 0 * * 2-6`, `0 4 * * 2-6` | 화~토 ≈10:30·14:00 | `python settled_backfill.py` |
 
 ### 공통 구성
 - `concurrency.group: sheet-writer` — 시트 쓰기 워크플로우가 동시에 실행되지 않도록 직렬화

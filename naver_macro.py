@@ -70,6 +70,26 @@ _DISPATCH = {
 # 사고: CMCU0 /prices 바가 늦게 게시돼 시트에 D-1(+0.80%)이 박힘, 실제 -0.45%.)
 _SPOT_METALS = {"CMCU0"}
 
+# fxlist 일별 바(/prices)의 카테고리 — 코드마다 다르다. 지수형(.DXY)·고시환율
+# (FX_USDKRW)은 exchange 아래지만, 통화쌍(EURUSD)은 exchangeWorld 아래에만 있다.
+# 틀린 카테고리는 404가 아니라 **빈 배열**을 돌려줘 예외 없이 데스크 폴백으로 새고,
+# worldDailyQuote(아시아-세션 클럭)의 다른 시리즈가 조용히 시트에 박힌다.
+# (2026-07-22 사고: EUR/USD가 07-21 종가 1.1398/-0.14% 대신 데스크 1.1405/-0.01%.)
+_FX_PRICES_CATS = {
+    ".DXY":      ("exchange",),
+    "FX_USDKRW": ("exchange",),
+    "EURUSD":    ("exchangeWorld",),
+}
+
+
+def _fx_prices_latest(code):
+    """fxlist 코드의 일별 정산 바 -> (val, chg_str, ratio). 카테고리 자동 판별."""
+    for cat in _FX_PRICES_CATS.get(code, ("exchange", "exchangeWorld")):
+        v = _prices_latest(cat, code)
+        if v[0] is not None:
+            return v
+    return None, "", None
+
 # yfinance 티커 -> 논리 key (호출부 매핑용). BTC-USD는 의도적으로 제외.
 TICKER_KEY = {
     "DX-Y.NYB": "DXY",
@@ -263,16 +283,14 @@ def naver_quote(key, settled=False):
         if strat == "fxlist":
             if settled:
                 # 마감 후 배치: 라이브 호가(장중 스냅샷) 대신 일별 정산 종가.
-                # .DXY·FX_USDKRW는 exchange/{code}/prices 일별 바가 있고, EURUSD는
-                # 이 경로가 비어 worldDailyQuote(FX_EURUSD) 일별 종가로 폴백한다.
-                d = _prices_latest("exchange", code)
+                # 카테고리는 코드마다 다르다(_FX_PRICES_CATS) — EURUSD는 exchangeWorld.
+                d = _fx_prices_latest(code)
                 if d[0] is not None:
                     return d
-                desk_code = code if code.startswith("FX_") else "FX_" + code.lstrip(".")
-                d = _fetch_desk_fx(desk_code)
-                if d[0] is not None:
-                    return d
-                # 둘 다 실패 → 라이브로 폴백(아래 공통 경로)
+                # 일별 바 실패 시 worldDailyQuote 데스크로 폴백하지 않는다 — fxdesk와
+                # 같은 이유(아시아-세션 클럭)로 NY 종가 시트와 다른 시리즈다. (None,'',None)을
+                # 반환해 호출부가 yfinance 일별 바로 폴백하게 한다.
+                return None, "", None
             return _from_item(_find_in_lists(_get_json(f"{_API}/marketindex/exchange"), code))
         if strat == "fxdesk":
             if settled:
@@ -324,9 +342,16 @@ def naver_quote_fmt_for_ticker(ticker, settled=False):
 def naver_settled_date(key):
     """settled 바의 거래일('YYYY-MM-DD'). 시트 대상일과 일치하는지 검증용. 실패 시 None."""
     spec = _DISPATCH.get(key)
-    if not spec or spec[0] not in ("bond", "energy", "metals"):
+    if not spec or spec[0] not in ("bond", "energy", "metals", "fxlist"):
         return None
     strat, code = spec
+    if strat == "fxlist":
+        # 일별 바 카테고리가 코드마다 달라 naver_quote와 같은 판별 경로를 탄다.
+        for cat in _FX_PRICES_CATS.get(code, ("exchange", "exchangeWorld")):
+            bars = _prices_bars(cat, code)
+            if bars:
+                return (bars[0].get("localTradedAt") or "")[:10] or None
+        return None
     bars = _prices_bars(strat, code)
     bar_date = (bars[0].get("localTradedAt") or "")[:10] if bars else None
     # 현물 금속(CMCU0)은 naver_quote가 라이브 우선(=더 신선한 거래일)을 쓰므로,

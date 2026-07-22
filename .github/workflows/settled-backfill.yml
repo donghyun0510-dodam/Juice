@@ -1,0 +1,29 @@
+name: Settled Bar Backfill - Global
+on:
+  schedule:
+    # daily-global(≈22:35 UTC) 시점엔 네이버 /prices 일별 바가 아직 D-1까지만
+    # 게시된 지표가 있다(LME 현물 구리 CMCU0 상습). 몇 시간 뒤 다시 확인해 시트를 패치.
+    # 2회 — 1차에도 미게시면 2차가 잡는다. 멱등이라 중복 실행은 무해.
+    - cron: "30 0 * * 2-6"  # ≈10:30 KST (실제 지연 포함) · 화~토
+    - cron: "0 4 * * 2-6"   # ≈14:00 KST · 화~토
+  workflow_dispatch:
+
+concurrency:
+  group: sheet-writer
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    env:
+      TZ: Asia/Seoul
+      GOOGLE_OAUTH_TOKEN_B64: ${{ secrets.GOOGLE_OAUTH_TOKEN_B64 }}
+      GOOGLE_SA_JSON: ${{ secrets.GOOGLE_SA_JSON }}
+      GSHEET_FOLDER_ID: ${{ secrets.GSHEET_FOLDER_ID }}
+      RULES_DEPLOY_KEY: ${{ secrets.RULES_DEPLOY_KEY }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup
+
+      - name: Backfill settled bars (global sheet)
+        run: python settled_backfill.py
