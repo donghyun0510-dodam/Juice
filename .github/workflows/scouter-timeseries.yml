@@ -1,9 +1,14 @@
 name: Scouter Timeseries & Performance
 on:
   schedule:
-    # 일 1회 — UTC 월~금 20:17 = KST 화~토 05:17 (미국 종가 16:00 ET 직후).
-    # 정각 부근은 GH 부하로 스킵되기 쉬워 17분으로 분산.
-    - cron: "17 20 * * 1-5"
+    # 기록은 여전히 '일 1회'다 — notifier의 22h 가드가 중복 append를 막는다.
+    # 회차를 3번 두는 이유: 미국 종가 직후엔 원자재 정산 일별 바가 아직 D-1까지만
+    # 게시된 날이 많고(LME 현물 구리 상습), scouter_logger의 게시 가드가 그런 회차를
+    # 스킵하기 때문이다. 게시 시각이 일정하지 않아 '한 번 더 늦게'로는 못 맞춘다.
+    # 정각 부근은 GH 부하로 스킵되기 쉬워 분(minute)을 분산한다.
+    - cron: "17 20 * * 1-5"   # ≈KST 화~토 05:17 — 1차. 바 미게시면 스킵되는 게 정상
+    - cron: "30 0 * * 2-6"    # ≈KST 화~토 09:30 — 2차 (settled-backfill과 동일 시각대)
+    - cron: "0 4 * * 2-6"     # ≈KST 화~토 13:00 — 3차(최후)
   workflow_dispatch:
     inputs:
       force_append:
