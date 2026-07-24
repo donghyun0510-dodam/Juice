@@ -1,5 +1,5 @@
 """마감 후 배치 시각엔 아직 미게시였던 '정산 일별 바'를 뒤늦게 다시 확인해
-글로벌 시트(3.매크로 동향)의 원자재·FX 셀을 패치한다.
+글로벌 시트(3.매크로 동향)의 채권·원자재·FX 셀을 패치한다.
 
 배경 — daily_review(--global-only)는 미 장마감 ~1.5h 뒤(실제 22:35~22:52 UTC) 돈다.
 이때 네이버 /prices 일별 바가 아직 D-1까지만 게시된 지표가 있으면, 예외도 없이
@@ -9,12 +9,19 @@
 daily_review는 경고만 찍고 넘어가므로(고칠 방법이 그 시점엔 없음), 몇 시간 뒤
 이 스크립트가 다시 확인해 대상일 바가 게시됐으면 해당 셀만 덮어쓴다.
 
+채권(2Y/10Y/30Y)은 증상이 다르다 — get_yield_live는 정산 바가 아니라 **라이브 호가**를
+쓰므로 값이 D-1로 밀리진 않지만, 배치가 미 국채 현물 마감(17:00 ET) *전*에 돌면
+마감 직전 스냅샷이 박혀 등락률이 정산 종가와 어긋난다. (2026-07-24 사고: 05:52 KST
+=16:52 ET 수동 실행 → 2Y +1.14%/10Y +0.86% 기록, 실제 정산 종가는 +1.35%/+0.99%.)
+정산 바가 게시되면 여기서 종가로 맞춘다.
+
 동작:
   - 대상 세션일(target)은 daily_review.main과 같은 규칙(전일, 주말은 금요일)
   - naver_settled_date(key) == target 인 지표만 대상. 아직 미게시면 그대로 둠
   - 시트 값과 다를 때만 D(값)·E(등락률)·F(위험) 갱신 → 멱등, 변화 없으면 무동작
-  - 하나라도 바뀌면 '원자재 종합 경보'(C-Risk)·'★ 매크로 종합'을 시트에 표시된
-    값들로 재계산해 함께 갱신 (레그 입력을 재수집하지 않아 표시값과 항상 일치)
+  - 하나라도 바뀌면 '금리 종합 경보'(T-Risk)·'원자재 종합 경보'(C-Risk)·'★ 매크로
+    종합'을 시트에 표시된 값들로 재계산해 함께 갱신 (레그 입력을 재수집하지 않아
+    표시값과 항상 일치)
 
 사용: python settled_backfill.py [--date YYMMDD]
 """
@@ -25,12 +32,28 @@ from datetime import datetime, timedelta
 # daily_review import 시 sys.stdout이 UTF-8로 재설정된다. 여기서 또 감싸면 같은 버퍼에
 # 래퍼가 두 겹 붙어 먼저 것이 GC될 때 버퍼가 닫힌다 — 절대 중복 래핑하지 말 것.
 import daily_review as dr
+import naver_macro as nm
 from naver_macro import naver_settled_date
+
+
+def _bond_settled(key):
+    """미 국채 정산 일별 바 -> (price_str, chg_str, val). 표기는 get_yield_live와 동기(소수 3자리)."""
+    _strat, code = nm._DISPATCH[key]
+    val, chg, _ratio = nm._prices_latest("bond", code)
+    if val is None:
+        return "", "", None
+    return f"{val:.3f}", chg, val
 
 
 # 시트 라벨 -> (네이버 논리 key, 값 수집 함수, 위험 진단 함수 or None)
 # 값 수집 함수는 (price_str, chg_str) 또는 (price_str, chg_str, val)을 반환.
 PATCHABLE = [
+    ("2년물",   "2Y",     lambda: _bond_settled("2Y"),
+     lambda v, c: dr.assess_risk("2Y", v)),
+    ("10년물",  "10Y",    lambda: _bond_settled("10Y"),
+     lambda v, c: dr.assess_risk("10Y", v)),
+    ("30년물",  "30Y",    lambda: _bond_settled("30Y"),
+     lambda v, c: dr.assess_risk("30Y", v)),
     ("BRN",     "BRENT",  lambda: dr.get_price_and_change("BZ=F", settled=True),
      lambda v, c: dr.assess_risk("BRN", v, c)),
     ("WTI",     "WTI",    dr.get_wti_investing,
@@ -92,7 +115,7 @@ def set_cell(vals, row_1based, col_0based, value):
 
 
 def recompute_composites(vals, rows):
-    """시트에 표시된 값들로 C-Risk·매크로 종합을 재계산 -> [(A1범위, 값, 색상)].
+    """시트에 표시된 값들로 T-Risk·C-Risk·매크로 종합을 재계산 -> [(A1범위, 값, 색상)].
 
     레그 입력을 새로 수집하지 않고 시트 D/E열을 읽어 쓰므로, 갱신된 셀이 그대로
     반영되고 나머지 레그는 배치 시점 값이 유지된다(재수집하면 다음 세션 값이 섞인다).
@@ -119,7 +142,10 @@ def recompute_composites(vals, rows):
 
     # 매크로 종합: 금리·환율 레그는 수준만으로 결정되고, 위험심리는 VIX 수준·변동 +
     # 신용스프레드(HYG/IEF 일봉, 마감 후 고정) + 금·달러 모멘텀.
-    _, _, t_score = dr.compute_t_risk_index(val_of("2년물"), val_of("10년물"), val_of("30년물"))
+    t_label, t_color, t_score = dr.compute_t_risk_index(
+        val_of("2년물"), val_of("10년물"), val_of("30년물"))
+    if "금리 종합 경보" in rows and t_label:
+        out.append((f"F{rows['금리 종합 경보']}", t_label, t_color))
     _, _, fx_score = dr.compute_fx_risk_index(val_of("DXY"), val_of("USD/JPY"), val_of("USD/CNY"))
     vix_label = "VIX (선물)" if "VIX (선물)" in rows else "VIX"
     _, _, s_score = dr.compute_s_risk_index(
