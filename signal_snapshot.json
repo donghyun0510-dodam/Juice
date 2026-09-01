@@ -1,14 +1,15 @@
 {
   "global": {
-    "timestamp": "2026-08-29T12:20:15",
+    "timestamp": "2026-09-01T09:46:11",
     "signals": {
+      "^SOX": "neutral",
       "INTC": "neutral",
       "AMD": "neutral",
       "ARM": "neutral",
       "AMAT": "short",
       "ASML": "neutral",
-      "LRCX": "neutral",
-      "MU": "neutral",
+      "LRCX": "short",
+      "MU": "hold_long",
       "TXN": "neutral",
       "NVDA": "hold_long",
       "AVGO": "neutral",
@@ -24,7 +25,7 @@
       "MSFT": "hold_long",
       "AMZN": "hold_long",
       "GOOG": "neutral",
-      "META": "cover",
+      "META": "hold_sell",
       "NFLX": "neutral",
       "IBM": "hold_sell",
       "ADBE": "neutral",
@@ -36,7 +37,7 @@
       "NOW": "neutral",
       "SAP": "neutral",
       "TEM": "neutral",
-      "ETN": "sell",
+      "ETN": "neutral",
       "VRT": "neutral",
       "GEV": "neutral",
       "SMR": "neutral",
@@ -44,7 +45,7 @@
       "TLN": "hold_sell",
       "BWXT": "hold_sell",
       "CMI": "neutral",
-      "TSLA": "hold_sell",
+      "TSLA": "cover",
       "DE": "hold_long",
       "SYM": "hold_sell",
       "C": "neutral",
@@ -53,10 +54,10 @@
       "GS": "neutral",
       "GM": "hold_long",
       "F": "neutral",
-      "XOM": "sell",
+      "XOM": "hold_long",
       "COP": "hold_long",
-      "BP": "sell",
-      "TTE": "sell",
+      "BP": "hold_long",
+      "TTE": "hold_long",
       "DD": "neutral",
       "DOW": "neutral",
       "AA": "neutral",
@@ -69,7 +70,7 @@
       "LOW": "hold_sell",
       "NKE": "hold_sell",
       "NEE": "hold_sell",
-      "SU": "sell"
+      "SU": "hold_long"
     }
   },
   "korea": {
