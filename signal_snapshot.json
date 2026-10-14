@@ -1,8 +1,7 @@
 {
   "global": {
-    "timestamp": "2026-10-13T11:43:10",
+    "timestamp": "2026-10-14T09:34:50",
     "signals": {
-      "^SOX": "hold_long",
       "INTC": "neutral",
       "AMD": "sell",
       "ARM": "neutral",
