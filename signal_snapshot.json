@@ -1,8 +1,7 @@
 {
   "global": {
-    "timestamp": "2026-11-03T12:02:51",
+    "timestamp": "2026-11-04T10:37:34",
     "signals": {
-      "^SOX": "short",
       "INTC": "short",
       "AMD": "short",
       "ARM": "short",
