@@ -1,8 +1,8 @@
 {
   "last_grade": "위험",
-  "last_total": 63.8233142069662,
-  "last_timeseries_ts": "2026-11-05T08:17:49.010989",
-  "last_alert_ts": "2026-10-17T08:17:54.472692",
+  "last_total": 60.773785608312586,
+  "last_timeseries_ts": "2026-11-06T08:17:52.624288",
+  "last_alert_ts": "2026-11-06T08:17:54.969731",
   "last_perf_ts": "2026-04-16T22:17:48.803754",
-  "last_delta_date": "2026-10-17"
+  "last_delta_date": "2026-11-06"
 }
